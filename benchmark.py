@@ -17,6 +17,7 @@ from mdflash import mdflash_generate
 from pexpress import pexpress_generate
 from pflash import pflash_generate
 from pflash_v2 import pflash_v2_generate
+from pflash_v3 import pflash_v3_generate
 
 
 def main() -> None:
@@ -30,6 +31,7 @@ def main() -> None:
     parser.add_argument("--pexpress-budget", type=str, default=None)
     parser.add_argument("--pflash-budget", type=str, default=None)
     parser.add_argument("--pflash-v2-budget", type=str, default=None)
+    parser.add_argument("--pflash-v3-budget", type=str, default=None)
     parser.add_argument("--pexpress-perturbation-temperature", type=float, default=0.75)
     parser.add_argument("--pexpress-position-temperature-decay", type=float, default=0.0)
     parser.add_argument("--pflash-branch-prior-weight", type=float, default=0.5)
@@ -71,7 +73,7 @@ def main() -> None:
     draft_attn_implementation = "flash_attention_2"
 
     if not args.flash_attn and installed_flash_attn:
-        logger.warning("DDTree, MDFlash, P-Express, and P-Flash use a custom tree attention mask on the target model. For compatibility, forcing the target verifier to torch.sdpa.")
+        logger.warning("DDTree, MDFlash, P-Express, P-Flash, P-Flash V2, and P-Flash V3 use a custom tree attention mask on the target model. For compatibility, forcing the target verifier to torch.sdpa.")
 
     target = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
@@ -92,6 +94,7 @@ def main() -> None:
     pexpress_budgets = tree_budgets if args.pexpress_budget is None else [int(tree_budget) for tree_budget in args.pexpress_budget.split(",")]
     pflash_budgets = tree_budgets if args.pflash_budget is None else [int(tree_budget) for tree_budget in args.pflash_budget.split(",")]
     pflash_v2_budgets = tree_budgets if args.pflash_v2_budget is None else [int(tree_budget) for tree_budget in args.pflash_v2_budget.split(",")]
+    pflash_v3_budgets = tree_budgets if args.pflash_v3_budget is None else [int(tree_budget) for tree_budget in args.pflash_v3_budget.split(",")]
     methods_to_run = ["dflash"]
     method_key_to_tree_budget = {}
     if not args.flash_attn:
@@ -99,22 +102,26 @@ def main() -> None:
         pexpress_method_keys = [f"pexpress_tb{tree_budget}" for tree_budget in pexpress_budgets]
         pflash_method_keys = [f"pflash_tb{tree_budget}" for tree_budget in pflash_budgets]
         pflash_v2_method_keys = [f"pflash_v2_tb{tree_budget}" for tree_budget in pflash_v2_budgets]
+        pflash_v3_method_keys = [f"pflash_v3_tb{tree_budget}" for tree_budget in pflash_v3_budgets]
         ddtree_method_keys = [f"ddtree_tb{tree_budget}" for tree_budget in tree_budgets]
         methods_to_run.extend(mdflash_method_keys)
         methods_to_run.extend(pexpress_method_keys)
         methods_to_run.extend(pflash_method_keys)
         methods_to_run.extend(pflash_v2_method_keys)
+        methods_to_run.extend(pflash_v3_method_keys)
         methods_to_run.extend(ddtree_method_keys)
         method_key_to_tree_budget.update({f"mdflash_tb{tree_budget}": tree_budget for tree_budget in mdflash_budgets})
         method_key_to_tree_budget.update({f"pexpress_tb{tree_budget}": tree_budget for tree_budget in pexpress_budgets})
         method_key_to_tree_budget.update({f"pflash_tb{tree_budget}": tree_budget for tree_budget in pflash_budgets})
         method_key_to_tree_budget.update({f"pflash_v2_tb{tree_budget}": tree_budget for tree_budget in pflash_v2_budgets})
+        method_key_to_tree_budget.update({f"pflash_v3_tb{tree_budget}": tree_budget for tree_budget in pflash_v3_budgets})
         method_key_to_tree_budget.update({f"ddtree_tb{tree_budget}": tree_budget for tree_budget in tree_budgets})
     else:
         mdflash_method_keys = []
         pexpress_method_keys = []
         pflash_method_keys = []
         pflash_v2_method_keys = []
+        pflash_v3_method_keys = []
         ddtree_method_keys = []
 
     def run_method(method_key: str, input_ids: torch.Tensor, max_new_tokens: int):
@@ -167,6 +174,12 @@ def main() -> None:
                 perturbation_temperature=args.pexpress_perturbation_temperature,
                 position_temperature_decay=args.pexpress_position_temperature_decay,
             )
+        if method_key.startswith("pflash_v3_tb"):
+            return pflash_v3_generate(
+                **common_kwargs,
+                perturbation_temperature=args.pexpress_perturbation_temperature,
+                position_temperature_decay=args.pexpress_position_temperature_decay,
+            )
         if method_key.startswith("ddtree_tb"):
             return ddtree_generate(**common_kwargs)
         raise ValueError(f"Unsupported method key: {method_key}")
@@ -177,6 +190,8 @@ def main() -> None:
         history_method_key = pflash_method_keys[-1]
     elif pflash_v2_method_keys:
         history_method_key = pflash_v2_method_keys[-1]
+    elif pflash_v3_method_keys:
+        history_method_key = pflash_v3_method_keys[-1]
     elif pexpress_method_keys:
         history_method_key = pexpress_method_keys[-1]
     elif mdflash_method_keys:

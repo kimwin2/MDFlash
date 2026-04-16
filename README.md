@@ -26,9 +26,9 @@ bash run_benchmark.sh
 ```
 
 This produces benchmark outputs in `runs/` and logs in `logs/`.
-The benchmark runner compares autoregressive decoding, DFlash, MDFlash, P-Express, P-Flash, P-Flash V2, and DDTree in the same sweep.
+The benchmark runner compares autoregressive decoding, DFlash, MDFlash, P-Express, P-Flash, P-Flash V2, P-Flash V3, and DDTree in the same sweep.
 
-`run_benchmark.sh` also exposes `PEXPRESS_PERTURBATION_TEMPERATURE`, `PEXPRESS_POSITION_TEMPERATURE_DECAY`, `PFLASH_BRANCH_PRIOR_WEIGHT`, `PFLASH_MERGE_PREFIX_BRANCHES`, and `PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT` as environment-variable overrides for tuning the perturbation sweep. P-Express, P-Flash, and P-Flash V2 all reuse the perturbation settings, while P-Flash adds a branch-prior penalty and can optionally merge branch proposals into a shared-prefix trie with a configurable support bonus.
+`run_benchmark.sh` also exposes `PEXPRESS_PERTURBATION_TEMPERATURE`, `PEXPRESS_POSITION_TEMPERATURE_DECAY`, `PFLASH_BRANCH_PRIOR_WEIGHT`, `PFLASH_MERGE_PREFIX_BRANCHES`, and `PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT` as environment-variable overrides for tuning the perturbation sweep. P-Express, P-Flash, P-Flash V2, and P-Flash V3 all reuse the perturbation settings, while P-Flash adds a branch-prior penalty and can optionally merge branch proposals into a shared-prefix trie with a configurable support bonus.
 
 ## Reproduce Paper Artifacts
 
