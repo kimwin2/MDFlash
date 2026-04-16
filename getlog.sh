@@ -16,7 +16,7 @@ from collections import defaultdict
 
 import torch
 
-from agreement_metrics import summarize_batch_agreement_metrics
+from agreement_metrics import bucket_batch_agreement_metrics, summarize_batch_agreement_metrics
 
 
 def load_and_analyze(pt_path):
@@ -144,6 +144,7 @@ def print_pair_sanity_checks(data):
 
 def print_batch_agreement_summary(data):
     rows = []
+    bucket_rows = []
     responses = data["responses"]
     for method in data["methods"]:
         collected_metrics = []
@@ -158,6 +159,11 @@ def print_batch_agreement_summary(data):
         if summary["rounds"] == 0:
             continue
         rows.append((method, summary))
+        bucket_rows.extend(
+            (method, bucket)
+            for bucket in bucket_batch_agreement_metrics(collected_metrics)
+            if bucket["rounds"] > 0
+        )
 
     if not rows:
         return
@@ -197,6 +203,32 @@ def print_batch_agreement_summary(data):
         )
     print("  Tok* r: token-level Pearson against per-depth accepted/not-accepted.")
     print("  Rnd* r: round-level Pearson against accepted draft-token count.")
+
+    if not bucket_rows:
+        return
+
+    print("-" * 120)
+    print("Round mean agreement buckets")
+    print(
+        "{:<20} | {:>11} | {:>7} | {:>8} | {:>8}".format(
+            "Method",
+            "MeanAgr",
+            "Rounds",
+            "AvgMean",
+            "AvgAcc",
+        )
+    )
+    print("-" * 120)
+    for method, bucket in bucket_rows:
+        print(
+            "{:<20} | {:>11} | {:>7} | {:>8} | {:>8}".format(
+                method,
+                bucket["label"],
+                bucket["rounds"],
+                fmt(bucket["avg_mean_agreement"]),
+                fmt(bucket["avg_accepted_draft_tokens"]),
+            )
+        )
 
 
 def print_single_result(data, filename):

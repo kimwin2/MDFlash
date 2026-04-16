@@ -131,3 +131,61 @@ def summarize_batch_agreement_metrics(metrics: list[dict[str, Any]]) -> dict[str
         "round_first_majority_pearson": pearson_correlation(round_first_majority_x, round_y),
         "round_mean_majority_pearson": pearson_correlation(round_mean_majority_x, round_y),
     }
+
+
+def bucket_batch_agreement_metrics(
+    metrics: list[dict[str, Any]],
+    bucket_edges: tuple[float, ...] = (0.75, 0.80, 0.85, 0.90, 0.95),
+) -> list[dict[str, float | int | str]]:
+    buckets = [
+        {
+            "label": f"<{bucket_edges[0]:.2f}",
+            "low": float("-inf"),
+            "high": bucket_edges[0],
+            "count": 0,
+            "agreement_sum": 0.0,
+            "accepted_sum": 0.0,
+        }
+    ]
+    for low, high in zip(bucket_edges, bucket_edges[1:]):
+        buckets.append({
+            "label": f"{low:.2f}-{high:.2f}",
+            "low": low,
+            "high": high,
+            "count": 0,
+            "agreement_sum": 0.0,
+            "accepted_sum": 0.0,
+        })
+    buckets.append({
+        "label": f">={bucket_edges[-1]:.2f}",
+        "low": bucket_edges[-1],
+        "high": float("inf"),
+        "count": 0,
+        "agreement_sum": 0.0,
+        "accepted_sum": 0.0,
+    })
+
+    for metric in metrics:
+        majority_agreement = [float(value) for value in metric.get("majority_agreement", [])]
+        if not majority_agreement:
+            continue
+
+        mean_agreement = sum(majority_agreement) / len(majority_agreement)
+        accepted_draft_tokens = float(metric.get("accepted_draft_tokens", 0))
+        for bucket in buckets:
+            if bucket["low"] <= mean_agreement < bucket["high"]:
+                bucket["count"] += 1
+                bucket["agreement_sum"] += mean_agreement
+                bucket["accepted_sum"] += accepted_draft_tokens
+                break
+
+    rows = []
+    for bucket in buckets:
+        count = int(bucket["count"])
+        rows.append({
+            "label": str(bucket["label"]),
+            "rounds": count,
+            "avg_mean_agreement": bucket["agreement_sum"] / count if count else None,
+            "avg_accepted_draft_tokens": bucket["accepted_sum"] / count if count else None,
+        })
+    return rows
