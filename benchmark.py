@@ -20,6 +20,7 @@ from pflash_v2 import pflash_v2_generate
 from pflash_v3 import pflash_v3_generate
 from pflash_v4 import pflash_v4_generate
 from pflash_v5 import pflash_v5_generate
+from pflash_v6 import pflash_v6_generate
 
 
 def main() -> None:
@@ -36,6 +37,7 @@ def main() -> None:
     parser.add_argument("--pflash-v3-budget", type=str, default=None)
     parser.add_argument("--pflash-v4-budget", type=str, default=None)
     parser.add_argument("--pflash-v5-budget", type=str, default=None)
+    parser.add_argument("--pflash-v6-budget", type=str, default=None)
     parser.add_argument("--pexpress-perturbation-temperature", type=float, default=0.75)
     parser.add_argument("--pexpress-position-temperature-decay", type=float, default=0.0)
     parser.add_argument("--pflash-branch-prior-weight", type=float, default=0.5)
@@ -48,6 +50,14 @@ def main() -> None:
     parser.add_argument("--pflash-v5-high-agreement-threshold", type=float, default=0.95)
     parser.add_argument("--pflash-v5-mid-agreement-threshold", type=float, default=0.90)
     parser.add_argument("--pflash-v5-low-agreement-depth", type=int, default=5)
+    parser.add_argument("--pflash-v6-high-alignment-threshold", type=float, default=0.95)
+    parser.add_argument("--pflash-v6-mid-alignment-threshold", type=float, default=0.90)
+    parser.add_argument("--pflash-v6-high-block-size", type=int, default=16)
+    parser.add_argument("--pflash-v6-mid-block-size", type=int, default=8)
+    parser.add_argument("--pflash-v6-low-block-size", type=int, default=8)
+    parser.add_argument("--pflash-v6-high-tree-budget", type=int, default=128)
+    parser.add_argument("--pflash-v6-mid-tree-budget", type=int, default=64)
+    parser.add_argument("--pflash-v6-low-tree-budget", type=int, default=32)
     parser.add_argument("--measure-batch-agreement", action="store_true")
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--max-samples", type=int, default=None)
@@ -85,7 +95,7 @@ def main() -> None:
     draft_attn_implementation = "flash_attention_2"
 
     if not args.flash_attn and installed_flash_attn:
-        logger.warning("DDTree, MDFlash, P-Express, P-Flash, P-Flash V2, P-Flash V3, P-Flash V4, and P-Flash V5 use a custom tree attention mask on the target model. For compatibility, forcing the target verifier to torch.sdpa.")
+        logger.warning("DDTree, MDFlash, P-Express, P-Flash, P-Flash V2, P-Flash V3, P-Flash V4, P-Flash V5, and P-Flash V6 use a custom tree attention mask on the target model. For compatibility, forcing the target verifier to torch.sdpa.")
 
     target = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
@@ -109,6 +119,7 @@ def main() -> None:
     pflash_v3_budgets = tree_budgets if args.pflash_v3_budget is None else [int(tree_budget) for tree_budget in args.pflash_v3_budget.split(",")]
     pflash_v4_budgets = tree_budgets if args.pflash_v4_budget is None else [int(tree_budget) for tree_budget in args.pflash_v4_budget.split(",")]
     pflash_v5_budgets = tree_budgets if args.pflash_v5_budget is None else [int(tree_budget) for tree_budget in args.pflash_v5_budget.split(",")]
+    pflash_v6_budgets = tree_budgets if args.pflash_v6_budget is None else [int(tree_budget) for tree_budget in args.pflash_v6_budget.split(",")]
     methods_to_run = ["dflash"]
     method_key_to_tree_budget = {}
     if not args.flash_attn:
@@ -119,6 +130,7 @@ def main() -> None:
         pflash_v3_method_keys = [f"pflash_v3_tb{tree_budget}" for tree_budget in pflash_v3_budgets]
         pflash_v4_method_keys = [f"pflash_v4_tb{tree_budget}" for tree_budget in pflash_v4_budgets]
         pflash_v5_method_keys = [f"pflash_v5_tb{tree_budget}" for tree_budget in pflash_v5_budgets]
+        pflash_v6_method_keys = [f"pflash_v6_tb{tree_budget}" for tree_budget in pflash_v6_budgets]
         ddtree_method_keys = [f"ddtree_tb{tree_budget}" for tree_budget in tree_budgets]
         methods_to_run.extend(mdflash_method_keys)
         methods_to_run.extend(pexpress_method_keys)
@@ -127,6 +139,7 @@ def main() -> None:
         methods_to_run.extend(pflash_v3_method_keys)
         methods_to_run.extend(pflash_v4_method_keys)
         methods_to_run.extend(pflash_v5_method_keys)
+        methods_to_run.extend(pflash_v6_method_keys)
         methods_to_run.extend(ddtree_method_keys)
         method_key_to_tree_budget.update({f"mdflash_tb{tree_budget}": tree_budget for tree_budget in mdflash_budgets})
         method_key_to_tree_budget.update({f"pexpress_tb{tree_budget}": tree_budget for tree_budget in pexpress_budgets})
@@ -135,6 +148,7 @@ def main() -> None:
         method_key_to_tree_budget.update({f"pflash_v3_tb{tree_budget}": tree_budget for tree_budget in pflash_v3_budgets})
         method_key_to_tree_budget.update({f"pflash_v4_tb{tree_budget}": tree_budget for tree_budget in pflash_v4_budgets})
         method_key_to_tree_budget.update({f"pflash_v5_tb{tree_budget}": tree_budget for tree_budget in pflash_v5_budgets})
+        method_key_to_tree_budget.update({f"pflash_v6_tb{tree_budget}": tree_budget for tree_budget in pflash_v6_budgets})
         method_key_to_tree_budget.update({f"ddtree_tb{tree_budget}": tree_budget for tree_budget in tree_budgets})
     else:
         mdflash_method_keys = []
@@ -144,6 +158,7 @@ def main() -> None:
         pflash_v3_method_keys = []
         pflash_v4_method_keys = []
         pflash_v5_method_keys = []
+        pflash_v6_method_keys = []
         ddtree_method_keys = []
 
     def run_method(method_key: str, input_ids: torch.Tensor, max_new_tokens: int):
@@ -227,6 +242,21 @@ def main() -> None:
                 low_agreement_depth=args.pflash_v5_low_agreement_depth,
                 measure_batch_agreement=args.measure_batch_agreement,
             )
+        if method_key.startswith("pflash_v6_tb"):
+            return pflash_v6_generate(
+                **common_kwargs,
+                perturbation_temperature=args.pexpress_perturbation_temperature,
+                position_temperature_decay=args.pexpress_position_temperature_decay,
+                high_alignment_threshold=args.pflash_v6_high_alignment_threshold,
+                mid_alignment_threshold=args.pflash_v6_mid_alignment_threshold,
+                high_block_size=args.pflash_v6_high_block_size,
+                mid_block_size=args.pflash_v6_mid_block_size,
+                low_block_size=args.pflash_v6_low_block_size,
+                high_tree_budget=args.pflash_v6_high_tree_budget,
+                mid_tree_budget=args.pflash_v6_mid_tree_budget,
+                low_tree_budget=args.pflash_v6_low_tree_budget,
+                measure_batch_agreement=args.measure_batch_agreement,
+            )
         if method_key.startswith("ddtree_tb"):
             return ddtree_generate(**common_kwargs)
         raise ValueError(f"Unsupported method key: {method_key}")
@@ -243,6 +273,8 @@ def main() -> None:
         history_method_key = pflash_v4_method_keys[-1]
     elif pflash_v5_method_keys:
         history_method_key = pflash_v5_method_keys[-1]
+    elif pflash_v6_method_keys:
+        history_method_key = pflash_v6_method_keys[-1]
     elif pexpress_method_keys:
         history_method_key = pexpress_method_keys[-1]
     elif mdflash_method_keys:

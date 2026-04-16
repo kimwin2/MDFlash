@@ -48,6 +48,14 @@ PFLASH_V4_GRAFT_SCORE_THRESHOLD="${PFLASH_V4_GRAFT_SCORE_THRESHOLD:-1.0}"
 PFLASH_V5_HIGH_AGREEMENT_THRESHOLD="${PFLASH_V5_HIGH_AGREEMENT_THRESHOLD:-0.95}"
 PFLASH_V5_MID_AGREEMENT_THRESHOLD="${PFLASH_V5_MID_AGREEMENT_THRESHOLD:-0.90}"
 PFLASH_V5_LOW_AGREEMENT_DEPTH="${PFLASH_V5_LOW_AGREEMENT_DEPTH:-5}"
+PFLASH_V6_HIGH_ALIGNMENT_THRESHOLD="${PFLASH_V6_HIGH_ALIGNMENT_THRESHOLD:-0.95}"
+PFLASH_V6_MID_ALIGNMENT_THRESHOLD="${PFLASH_V6_MID_ALIGNMENT_THRESHOLD:-0.90}"
+PFLASH_V6_HIGH_BLOCK_SIZE="${PFLASH_V6_HIGH_BLOCK_SIZE:-16}"
+PFLASH_V6_MID_BLOCK_SIZE="${PFLASH_V6_MID_BLOCK_SIZE:-8}"
+PFLASH_V6_LOW_BLOCK_SIZE="${PFLASH_V6_LOW_BLOCK_SIZE:-8}"
+PFLASH_V6_HIGH_TREE_BUDGET="${PFLASH_V6_HIGH_TREE_BUDGET:-128}"
+PFLASH_V6_MID_TREE_BUDGET="${PFLASH_V6_MID_TREE_BUDGET:-64}"
+PFLASH_V6_LOW_TREE_BUDGET="${PFLASH_V6_LOW_TREE_BUDGET:-32}"
 MEASURE_BATCH_AGREEMENT="${MEASURE_BATCH_AGREEMENT:-0}"
 
 PFLASH_EXTRA_BENCHMARK_ARGS=()
@@ -72,6 +80,14 @@ COMMON_BENCHMARK_ARGS=(
   --pflash-v5-high-agreement-threshold "${PFLASH_V5_HIGH_AGREEMENT_THRESHOLD}"
   --pflash-v5-mid-agreement-threshold "${PFLASH_V5_MID_AGREEMENT_THRESHOLD}"
   --pflash-v5-low-agreement-depth "${PFLASH_V5_LOW_AGREEMENT_DEPTH}"
+  --pflash-v6-high-alignment-threshold "${PFLASH_V6_HIGH_ALIGNMENT_THRESHOLD}"
+  --pflash-v6-mid-alignment-threshold "${PFLASH_V6_MID_ALIGNMENT_THRESHOLD}"
+  --pflash-v6-high-block-size "${PFLASH_V6_HIGH_BLOCK_SIZE}"
+  --pflash-v6-mid-block-size "${PFLASH_V6_MID_BLOCK_SIZE}"
+  --pflash-v6-low-block-size "${PFLASH_V6_LOW_BLOCK_SIZE}"
+  --pflash-v6-high-tree-budget "${PFLASH_V6_HIGH_TREE_BUDGET}"
+  --pflash-v6-mid-tree-budget "${PFLASH_V6_MID_TREE_BUDGET}"
+  --pflash-v6-low-tree-budget "${PFLASH_V6_LOW_TREE_BUDGET}"
   "${PFLASH_EXTRA_BENCHMARK_ARGS[@]}"
 )
 
@@ -81,6 +97,35 @@ slugify() {
   value="${value//:/_}"
   value="${value// /_}"
   echo "$value"
+}
+
+build_config_slug() {
+  local parts=()
+  [[ "${MDFLASH_PROPOSAL_TEMPERATURE}" != "1.0" ]] && parts+=("md${MDFLASH_PROPOSAL_TEMPERATURE}")
+  [[ "${PEXPRESS_PERTURBATION_TEMPERATURE}" != "0.75" ]] && parts+=("pe${PEXPRESS_PERTURBATION_TEMPERATURE}")
+  [[ "${PEXPRESS_POSITION_TEMPERATURE_DECAY}" != "0.0" ]] && parts+=("pd${PEXPRESS_POSITION_TEMPERATURE_DECAY}")
+  [[ "${PFLASH_BRANCH_PRIOR_WEIGHT}" != "0.5" ]] && parts+=("pp${PFLASH_BRANCH_PRIOR_WEIGHT}")
+  [[ "${PFLASH_MERGE_PREFIX_BRANCHES}" != "0" ]] && parts+=("pm${PFLASH_MERGE_PREFIX_BRANCHES}")
+  [[ "${PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT}" != "0.0" ]] && parts+=("ps${PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT}")
+  [[ "${PFLASH_V4_BACKBONE_FRACTION}" != "0.75" ]] && parts+=("v4bf${PFLASH_V4_BACKBONE_FRACTION}")
+  [[ "${PFLASH_V4_SUPPORT_BONUS_WEIGHT}" != "0.70" ]] && parts+=("v4sb${PFLASH_V4_SUPPORT_BONUS_WEIGHT}")
+  [[ "${PFLASH_V4_BASE_GAP_PENALTY}" != "0.35" ]] && parts+=("v4bg${PFLASH_V4_BASE_GAP_PENALTY}")
+  [[ "${PFLASH_V4_GRAFT_SCORE_THRESHOLD}" != "1.0" ]] && parts+=("v4gt${PFLASH_V4_GRAFT_SCORE_THRESHOLD}")
+  [[ "${PFLASH_V5_HIGH_AGREEMENT_THRESHOLD}" != "0.95" ]] && parts+=("v5hi${PFLASH_V5_HIGH_AGREEMENT_THRESHOLD}")
+  [[ "${PFLASH_V5_MID_AGREEMENT_THRESHOLD}" != "0.90" ]] && parts+=("v5mid${PFLASH_V5_MID_AGREEMENT_THRESHOLD}")
+  [[ "${PFLASH_V5_LOW_AGREEMENT_DEPTH}" != "5" ]] && parts+=("v5low${PFLASH_V5_LOW_AGREEMENT_DEPTH}")
+  [[ "${PFLASH_V6_HIGH_ALIGNMENT_THRESHOLD}" != "0.95" ]] && parts+=("v6hi${PFLASH_V6_HIGH_ALIGNMENT_THRESHOLD}")
+  [[ "${PFLASH_V6_MID_ALIGNMENT_THRESHOLD}" != "0.90" ]] && parts+=("v6mid${PFLASH_V6_MID_ALIGNMENT_THRESHOLD}")
+  [[ "${PFLASH_V6_HIGH_BLOCK_SIZE}" != "16" ]] && parts+=("v6hb${PFLASH_V6_HIGH_BLOCK_SIZE}")
+  [[ "${PFLASH_V6_MID_BLOCK_SIZE}" != "8" ]] && parts+=("v6mb${PFLASH_V6_MID_BLOCK_SIZE}")
+  [[ "${PFLASH_V6_LOW_BLOCK_SIZE}" != "8" ]] && parts+=("v6lb${PFLASH_V6_LOW_BLOCK_SIZE}")
+  [[ "${PFLASH_V6_HIGH_TREE_BUDGET}" != "128" ]] && parts+=("v6ht${PFLASH_V6_HIGH_TREE_BUDGET}")
+  [[ "${PFLASH_V6_MID_TREE_BUDGET}" != "64" ]] && parts+=("v6mt${PFLASH_V6_MID_TREE_BUDGET}")
+  [[ "${PFLASH_V6_LOW_TREE_BUDGET}" != "32" ]] && parts+=("v6lt${PFLASH_V6_LOW_TREE_BUDGET}")
+  [[ "${MEASURE_BATCH_AGREEMENT}" != "0" ]] && parts+=("ba${MEASURE_BATCH_AGREEMENT}")
+
+  local IFS="_"
+  slugify "${parts[*]}"
 }
 
 run_benchmark() {
@@ -127,21 +172,8 @@ for task in "${TASKS[@]}"; do
     for temperature in "${TEMPERATURES[@]}"; do
       temperature_slug="$(slugify "${temperature}")"
       config_suffix=""
-      if [[ "${MDFLASH_PROPOSAL_TEMPERATURE}" != "1.0" ]] \
-        || [[ "${PEXPRESS_PERTURBATION_TEMPERATURE}" != "0.75" ]] \
-        || [[ "${PEXPRESS_POSITION_TEMPERATURE_DECAY}" != "0.0" ]] \
-        || [[ "${PFLASH_BRANCH_PRIOR_WEIGHT}" != "0.5" ]] \
-        || [[ "${PFLASH_MERGE_PREFIX_BRANCHES}" != "0" ]] \
-        || [[ "${PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT}" != "0.0" ]] \
-        || [[ "${PFLASH_V4_BACKBONE_FRACTION}" != "0.75" ]] \
-        || [[ "${PFLASH_V4_SUPPORT_BONUS_WEIGHT}" != "0.70" ]] \
-        || [[ "${PFLASH_V4_BASE_GAP_PENALTY}" != "0.35" ]] \
-        || [[ "${PFLASH_V4_GRAFT_SCORE_THRESHOLD}" != "1.0" ]] \
-        || [[ "${PFLASH_V5_HIGH_AGREEMENT_THRESHOLD}" != "0.95" ]] \
-        || [[ "${PFLASH_V5_MID_AGREEMENT_THRESHOLD}" != "0.90" ]] \
-        || [[ "${PFLASH_V5_LOW_AGREEMENT_DEPTH}" != "5" ]] \
-        || [[ "${MEASURE_BATCH_AGREEMENT}" != "0" ]]; then
-        config_slug="$(slugify "md${MDFLASH_PROPOSAL_TEMPERATURE}_pe${PEXPRESS_PERTURBATION_TEMPERATURE}_pd${PEXPRESS_POSITION_TEMPERATURE_DECAY}_pp${PFLASH_BRANCH_PRIOR_WEIGHT}_pm${PFLASH_MERGE_PREFIX_BRANCHES}_ps${PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT}_v4bf${PFLASH_V4_BACKBONE_FRACTION}_v4sb${PFLASH_V4_SUPPORT_BONUS_WEIGHT}_v4bg${PFLASH_V4_BASE_GAP_PENALTY}_v4gt${PFLASH_V4_GRAFT_SCORE_THRESHOLD}_v5hi${PFLASH_V5_HIGH_AGREEMENT_THRESHOLD}_v5mid${PFLASH_V5_MID_AGREEMENT_THRESHOLD}_v5low${PFLASH_V5_LOW_AGREEMENT_DEPTH}_ba${MEASURE_BATCH_AGREEMENT}")"
+      config_slug="$(build_config_slug)"
+      if [[ -n "${config_slug}" ]]; then
         config_suffix="__cfg${config_slug}"
       fi
       run_name="${dataset_name}__${model_slug}__${draft_slug}__temp${temperature_slug}${config_suffix}"

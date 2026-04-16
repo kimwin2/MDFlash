@@ -102,7 +102,7 @@ def print_pair_sanity_checks(data):
     checked_pairs = []
 
     for method in sorted(methods):
-        for prefix in ("pflash_v2_tb", "pflash_v3_tb", "pflash_v4_tb", "pflash_v5_tb"):
+        for prefix in ("pflash_v2_tb", "pflash_v3_tb", "pflash_v4_tb", "pflash_v5_tb", "pflash_v6_tb"):
             if not method.startswith(prefix):
                 continue
             budget = method.removeprefix(prefix)
@@ -142,9 +142,50 @@ def print_pair_sanity_checks(data):
         )
 
 
+def summarize_adaptive_modes(metrics):
+    by_mode = {}
+    for metric in metrics:
+        mode = metric.get("adaptive_mode")
+        if mode is None:
+            continue
+
+        majority_agreement = [float(value) for value in metric.get("majority_agreement", [])]
+        if not majority_agreement:
+            continue
+
+        row = by_mode.setdefault(mode, {
+            "mode": mode,
+            "rounds": 0,
+            "block_sum": 0.0,
+            "tree_sum": 0.0,
+            "agreement_sum": 0.0,
+            "accepted_sum": 0.0,
+        })
+        row["rounds"] += 1
+        row["block_sum"] += float(metric.get("effective_block_size", 0))
+        row["tree_sum"] += float(metric.get("effective_tree_budget", 0))
+        row["agreement_sum"] += sum(majority_agreement) / len(majority_agreement)
+        row["accepted_sum"] += float(metric.get("accepted_draft_tokens", 0))
+
+    mode_order = {"high": 0, "mid": 1, "low": 2}
+    rows = []
+    for row in by_mode.values():
+        rounds = row["rounds"]
+        rows.append({
+            "mode": row["mode"],
+            "rounds": rounds,
+            "avg_block_size": row["block_sum"] / rounds,
+            "avg_tree_budget": row["tree_sum"] / rounds,
+            "avg_mean_agreement": row["agreement_sum"] / rounds,
+            "avg_accepted_draft_tokens": row["accepted_sum"] / rounds,
+        })
+    return sorted(rows, key=lambda row: mode_order.get(row["mode"], 100))
+
+
 def print_batch_agreement_summary(data):
     rows = []
     bucket_rows = []
+    adaptive_rows = []
     responses = data["responses"]
     for method in data["methods"]:
         collected_metrics = []
@@ -164,6 +205,7 @@ def print_batch_agreement_summary(data):
             for bucket in bucket_batch_agreement_metrics(collected_metrics)
             if bucket["rounds"] > 0
         )
+        adaptive_rows.extend((method, row) for row in summarize_adaptive_modes(collected_metrics))
 
     if not rows:
         return
@@ -230,6 +272,34 @@ def print_batch_agreement_summary(data):
             )
         )
 
+    if adaptive_rows:
+        print("-" * 120)
+        print("Adaptive alignment routing")
+        print(
+            "{:<20} | {:>8} | {:>7} | {:>8} | {:>8} | {:>8} | {:>8}".format(
+                "Method",
+                "Mode",
+                "Rounds",
+                "AvgBlk",
+                "AvgTree",
+                "AvgAgr",
+                "AvgAcc",
+            )
+        )
+        print("-" * 120)
+        for method, row in adaptive_rows:
+            print(
+                "{:<20} | {:>8} | {:>7} | {:>8} | {:>8} | {:>8} | {:>8}".format(
+                    method,
+                    row["mode"],
+                    row["rounds"],
+                    fmt(row["avg_block_size"]),
+                    fmt(row["avg_tree_budget"]),
+                    fmt(row["avg_mean_agreement"]),
+                    fmt(row["avg_accepted_draft_tokens"]),
+                )
+            )
+
 
 def print_single_result(data, filename):
     methods = data["methods"]
@@ -248,6 +318,7 @@ def print_single_result(data, filename):
         "pflash_v3_budget",
         "pflash_v4_budget",
         "pflash_v5_budget",
+        "pflash_v6_budget",
         "pexpress_perturbation_temperature",
         "pexpress_position_temperature_decay",
         "pflash_branch_prior_weight",
@@ -260,6 +331,14 @@ def print_single_result(data, filename):
         "pflash_v5_high_agreement_threshold",
         "pflash_v5_mid_agreement_threshold",
         "pflash_v5_low_agreement_depth",
+        "pflash_v6_high_alignment_threshold",
+        "pflash_v6_mid_alignment_threshold",
+        "pflash_v6_high_block_size",
+        "pflash_v6_mid_block_size",
+        "pflash_v6_low_block_size",
+        "pflash_v6_high_tree_budget",
+        "pflash_v6_mid_tree_budget",
+        "pflash_v6_low_tree_budget",
         "measure_batch_agreement",
     ):
         print("  {}={}".format(name, args.get(name, "N/A")))
