@@ -163,18 +163,23 @@ class DFlashDraftModel(Qwen3PreTrainedModel):
         self.mask_token_id = self.config.dflash_config.get("mask_token_id", None)
         self.post_init()
 
+    def project_target_hidden(self, target_hidden: torch.Tensor) -> torch.Tensor:
+        return self.hidden_norm(self.fc(target_hidden))
+
     def forward(
         self,
         position_ids: torch.LongTensor,
         attention_mask: Optional[torch.Tensor] = None,
         noise_embedding: Optional[torch.Tensor] = None,
         target_hidden: Optional[torch.Tensor] = None,
+        target_hidden_is_projected: bool = False,
         past_key_values: Optional[Cache] = None,
         use_cache: bool = False,
         **kwargs,
     ) -> CausalLMOutputWithPast:
         hidden_states = noise_embedding
-        target_hidden = self.hidden_norm(self.fc(target_hidden))
+        if not target_hidden_is_projected:
+            target_hidden = self.project_target_hidden(target_hidden)
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
         for layer in self.layers:
             hidden_states = layer(

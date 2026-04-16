@@ -13,35 +13,62 @@ from ddtree import (
 )
 
 
-MDFLASH_STAGE_ORDER = ("draft", "candidate_sample", "tree_build", "tree_compile", "verify", "commit")
+PEXPRESS_STAGE_ORDER = ("draft", "candidate_sample", "tree_build", "tree_compile", "verify", "commit")
 
 
-def sample_candidate_chains(
-    draft_logits: torch.Tensor,
-    num_samples: int,
-    proposal_temperature: float,
+def build_perturbed_noise_embedding_batch(
+    base_noise_embedding: torch.Tensor,
+    num_branches: int,
+    perturbation_temperature: float,
+    position_temperature_decay: float = 0.0,
 ) -> torch.Tensor:
-    horizon = int(draft_logits.shape[0])
-    if num_samples <= 0:
-        return torch.empty((0, horizon), dtype=torch.long, device=draft_logits.device)
-    if horizon == 0:
-        return torch.empty((num_samples, 0), dtype=torch.long, device=draft_logits.device)
+    if num_branches <= 0:
+        raise ValueError("num_branches must be positive.")
+    if perturbation_temperature < 0.0:
+        raise ValueError("perturbation_temperature must be non-negative.")
+    if position_temperature_decay < 0.0:
+        raise ValueError("position_temperature_decay must be non-negative.")
 
-    logits = draft_logits.float()
-    if proposal_temperature < 1e-5:
-        greedy_chain = torch.argmax(logits, dim=-1)
-        return greedy_chain.unsqueeze(0).repeat(num_samples, 1)
+    batch_noise_embedding = base_noise_embedding.expand(num_branches, -1, -1).clone()
+    if num_branches == 1 or perturbation_temperature < 1e-5:
+        return batch_noise_embedding
 
-    probs = torch.softmax(logits / proposal_temperature, dim=-1)
-    per_depth_samples = [
-        torch.multinomial(probs[depth], num_samples=num_samples, replacement=True)
-        for depth in range(horizon)
-    ]
-    return torch.stack(per_depth_samples, dim=1)
+    _, block_size, hidden_size = batch_noise_embedding.shape
+    device = batch_noise_embedding.device
+
+    branch_directions = torch.randn((num_branches, hidden_size), device=device, dtype=torch.float32)
+    branch_directions[0].zero_()
+    branch_norms = torch.linalg.vector_norm(branch_directions, dim=-1, keepdim=True).clamp_min_(1e-6)
+    branch_directions = branch_directions / branch_norms
+    branch_directions[0].zero_()
+
+    branch_scales = torch.linspace(0.0, perturbation_temperature, steps=num_branches, device=device, dtype=torch.float32)
+    if position_temperature_decay == 0.0:
+        position_scales = torch.zeros((block_size,), device=device, dtype=torch.float32)
+        position_scales[0] = 1.0
+    else:
+        position_indices = torch.arange(block_size, device=device, dtype=torch.float32)
+        position_scales = torch.pow(position_temperature_decay, position_indices)
+
+    perturbation = (
+        branch_directions[:, None, :]
+        * branch_scales[:, None, None]
+        * position_scales[None, :, None]
+    ).to(dtype=batch_noise_embedding.dtype)
+    batch_noise_embedding.add_(perturbation)
+    return batch_noise_embedding
+
+
+def select_candidate_chains_from_batch(
+    draft_logits: torch.Tensor,
+) -> torch.Tensor:
+    if draft_logits.shape[0] == 0:
+        return torch.empty((0, draft_logits.shape[1]), dtype=torch.long, device=draft_logits.device)
+    return torch.argmax(draft_logits, dim=-1)
 
 
 @torch.inference_mode()
-def mdflash_generate(
+def pexpress_generate(
     model: DFlashDraftModel,
     target: AutoModelForCausalLM,
     input_ids: torch.Tensor,
@@ -51,7 +78,8 @@ def mdflash_generate(
     stop_token_ids: list[int],
     temperature: float = 0.0,
     tree_budget: int | None = None,
-    proposal_temperature: float = 1.0,
+    perturbation_temperature: float = 0.75,
+    position_temperature_decay: float = 0.0,
     save_tree_traces: bool = False,
 ) -> SimpleNamespace:
     if block_size <= 1:
@@ -92,7 +120,7 @@ def mdflash_generate(
 
     past_key_values_target = DynamicCache()
     past_key_values_draft = DynamicCache()
-    stage_times = empty_stage_times(MDFLASH_STAGE_ORDER)
+    stage_times = empty_stage_times(PEXPRESS_STAGE_ORDER)
 
     prefill_start = cuda_time()
     output = target(
@@ -123,13 +151,27 @@ def mdflash_generate(
     while start < max_length:
         block_output_ids = output_ids[:, start : start + block_size].clone()
         root_token = block_output_ids[:, :1]
+        num_branches = max(tree_budget, 1)
 
         draft_stage_start = cuda_time()
-        noise_embedding = target.model.embed_tokens(block_output_ids)
+        base_noise_embedding = target.model.embed_tokens(block_output_ids)
+        noise_embedding_batch = build_perturbed_noise_embedding_batch(
+            base_noise_embedding=base_noise_embedding,
+            num_branches=num_branches,
+            perturbation_temperature=perturbation_temperature,
+            position_temperature_decay=position_temperature_decay,
+        )
+        projected_target_hidden = model.project_target_hidden(target_hidden)
+        batched_target_hidden = projected_target_hidden.expand(num_branches, -1, -1)
+        draft_position_ids = position_ids[
+            :,
+            past_key_values_draft.get_seq_length() : start + block_size,
+        ].expand(num_branches, -1)
         draft_logits = target.lm_head(model(
-            target_hidden=target_hidden,
-            noise_embedding=noise_embedding,
-            position_ids=position_ids[:, past_key_values_draft.get_seq_length() : start + block_size],
+            target_hidden=batched_target_hidden,
+            target_hidden_is_projected=True,
+            noise_embedding=noise_embedding_batch,
+            position_ids=draft_position_ids,
             past_key_values=past_key_values_draft,
             use_cache=True,
             is_causal=False,
@@ -143,10 +185,8 @@ def mdflash_generate(
             stage_times["draft"] += draft_stage_elapsed
 
         sample_stage_start = cuda_time()
-        candidate_token_ids = sample_candidate_chains(
-            draft_logits=draft_logits[0],
-            num_samples=max(tree_budget, 1),
-            proposal_temperature=proposal_temperature,
+        candidate_token_ids = select_candidate_chains_from_batch(
+            draft_logits=draft_logits,
         )
         stage_times["candidate_sample"] += cuda_time() - sample_stage_start
 

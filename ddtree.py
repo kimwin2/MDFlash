@@ -166,6 +166,64 @@ def build_ddtree_tree(
     return node_token_ids, node_depths, parents, child_maps, visibility, build_subtimes
 
 
+def build_sampled_candidate_tree(
+    candidate_token_ids: torch.Tensor,
+    budget: int,
+) -> tuple[torch.Tensor, torch.Tensor, list[int], list[dict[int, int]], torch.Tensor]:
+    if budget <= 0 or candidate_token_ids.shape[0] == 0 or candidate_token_ids.shape[1] == 0:
+        visibility = torch.zeros((1, 1), dtype=torch.bool)
+        visibility[0, 0] = True
+        return (
+            torch.empty(0, dtype=torch.long),
+            torch.empty(0, dtype=torch.long),
+            [-1],
+            [dict()],
+            visibility,
+        )
+
+    candidate_token_ids_cpu = candidate_token_ids.to(device="cpu", dtype=torch.long)
+
+    parents = [-1]
+    child_maps: list[dict[int, int]] = [dict()]
+    node_token_ids: list[int] = []
+    node_depths: list[int] = []
+
+    tree_full = False
+    for chain in candidate_token_ids_cpu.tolist():
+        current_index = 0
+        for depth, token_id in enumerate(chain, start=1):
+            child_index = child_maps[current_index].get(token_id)
+            if child_index is None:
+                if len(node_token_ids) >= budget:
+                    tree_full = True
+                    break
+                child_index = len(parents)
+                parents.append(current_index)
+                child_maps.append(dict())
+                child_maps[current_index][token_id] = child_index
+                node_token_ids.append(token_id)
+                node_depths.append(depth)
+            current_index = child_index
+        if tree_full:
+            break
+
+    current_length = 1 + len(node_token_ids)
+    visibility_np = np.zeros((current_length, current_length), dtype=np.bool_)
+    visibility_np[0, 0] = True
+    for index in range(1, current_length):
+        parent_index = parents[index]
+        visibility_np[index, :index] = visibility_np[parent_index, :index]
+        visibility_np[index, index] = True
+
+    return (
+        torch.tensor(node_token_ids, dtype=torch.long),
+        torch.tensor(node_depths, dtype=torch.long),
+        parents,
+        child_maps,
+        torch.from_numpy(visibility_np),
+    )
+
+
 def compile_ddtree_tree(
     root_token_id: torch.Tensor,
     start: int,

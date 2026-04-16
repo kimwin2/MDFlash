@@ -63,6 +63,8 @@ def method_label(method_key: str) -> str:
         return "DFlash"
     if method_key.startswith("mdflash_tb"):
         return f"MDFlash ({method_key.removeprefix('mdflash_tb')})"
+    if method_key.startswith("pexpress_tb"):
+        return f"P-Express ({method_key.removeprefix('pexpress_tb')})"
     if method_key.startswith("ddtree_tb"):
         return f"DDTree ({method_key.removeprefix('ddtree_tb')})"
     return method_key
@@ -133,6 +135,16 @@ def build_rows(runs_dir: Path) -> list[tuple[str, str, str, str, float, float]]:
             best_mdflash_acceptance = mean_acceptance_length(sdpa_run_data, best_mdflash_method_key)
             rows.append((dataset, model_name, str(temperature), "MDFlash", best_mdflash_speedup, best_mdflash_acceptance))
 
+        pexpress_method_keys = [method_key for method_key in sdpa_run_data["responses"][0] if method_key.startswith("pexpress_tb")]
+        if pexpress_method_keys:
+            best_pexpress_method_key = max(
+                pexpress_method_keys,
+                key=lambda method_key: best_baseline_time_per_token / mean_time_per_token(sdpa_run_data, method_key),
+            )
+            best_pexpress_speedup = best_baseline_time_per_token / mean_time_per_token(sdpa_run_data, best_pexpress_method_key)
+            best_pexpress_acceptance = mean_acceptance_length(sdpa_run_data, best_pexpress_method_key)
+            rows.append((dataset, model_name, str(temperature), "P-Express", best_pexpress_speedup, best_pexpress_acceptance))
+
         ddtree_method_keys = [method_key for method_key in sdpa_run_data["responses"][0] if method_key.startswith("ddtree_tb")]
         best_ddtree_method_key = max(
             ddtree_method_keys,
@@ -165,7 +177,7 @@ def make_latex_table(rows: list[tuple[str, str, str, str, float, float]]) -> str
     datasets = sorted(set(r[0] for r in rows), key=lambda d: DATASET_ORDER.get(d, 100))
     models = sorted(set(r[1] for r in rows))
     temperatures = sorted(set(r[2] for r in rows))
-    method_order = {"DFlash": 0, "MDFlash": 1, "DDTree": 2}
+    method_order = {"DFlash": 0, "MDFlash": 1, "P-Express": 2, "DDTree": 3}
     methods = sorted(set(r[3] for r in rows), key=lambda method: (method_order.get(method, 100), method))
 
     # lookup: (temp, dataset, model, method) -> (speedup, acceptance)

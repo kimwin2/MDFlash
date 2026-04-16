@@ -102,6 +102,17 @@ def collect_plot_data(runs_dir: Path) -> list[dict]:
             mdflash_speedups[tb] = baseline_tpt / mean_time_per_token(sdpa, k)
             mdflash_acceptances[tb] = mean_acceptance_length(sdpa, k)
 
+        pexpress_keys = sorted(
+            [k for k in sdpa["responses"][0] if k.startswith("pexpress_tb")],
+            key=lambda k: int(k.removeprefix("pexpress_tb")),
+        )
+        pexpress_speedups = {}
+        pexpress_acceptances = {}
+        for k in pexpress_keys:
+            tb = int(k.removeprefix("pexpress_tb"))
+            pexpress_speedups[tb] = baseline_tpt / mean_time_per_token(sdpa, k)
+            pexpress_acceptances[tb] = mean_acceptance_length(sdpa, k)
+
         args = sdpa["args"]
         results.append({
             "dataset": args["dataset"],
@@ -113,6 +124,8 @@ def collect_plot_data(runs_dir: Path) -> list[dict]:
             "ddtree_acceptances": ddtree_acceptances,
             "mdflash_speedups": mdflash_speedups,
             "mdflash_acceptances": mdflash_acceptances,
+            "pexpress_speedups": pexpress_speedups,
+            "pexpress_acceptances": pexpress_acceptances,
         })
     return results
 
@@ -151,6 +164,11 @@ MODEL_COLORS_MDFLASH = {
     "Qwen3-4B":                      "#FDD0A2",  # light orange
     "Qwen3-8B":                      "#FDAE6B",  # medium orange
     "Qwen3-Coder-30B-A3B-Instruct":  "#E6550D",  # dark orange
+}
+MODEL_COLORS_PEXPRESS = {
+    "Qwen3-4B":                      "#C6DBEF",  # light blue
+    "Qwen3-8B":                      "#6BAED6",  # medium blue
+    "Qwen3-Coder-30B-A3B-Instruct":  "#2171B5",  # dark blue
 }
 
 
@@ -231,14 +249,16 @@ def plot_case_study(
         "legend.fontsize": 18.5,
     })
 
-    tree_budgets = sorted(set(r["ddtree_speedups"]) | set(r["mdflash_speedups"]))
+    tree_budgets = sorted(set(r["ddtree_speedups"]) | set(r["mdflash_speedups"]) | set(r["pexpress_speedups"]))
     if not tree_budgets:
-        raise ValueError("No DDTree or MDFlash budget sweep is available for the selected run.")
+        raise ValueError("No DDTree, MDFlash, or P-Express budget sweep is available for the selected run.")
 
     ddtree_speed_color = "#0072B2"
     mdflash_speed_color = "#009E73"
+    pexpress_speed_color = "#7B3294"
     ddtree_accept_color = "#D55E00"
     mdflash_accept_color = "#CC79A7"
+    pexpress_accept_color = "#8C6D31"
     baseline_color = "#6F6F6F"
 
     fig, ax_speed = plt.subplots(figsize=(8.2, 6.2))
@@ -273,6 +293,21 @@ def plot_case_study(
             markeredgewidth=0.8,
             zorder=4,
             label="MDFlash Speedup",
+        )[0])
+    if r["pexpress_speedups"]:
+        pexpress_budgets = sorted(r["pexpress_speedups"])
+        speed_handles.append(ax_speed.plot(
+            pexpress_budgets,
+            [r["pexpress_speedups"][tb] for tb in pexpress_budgets],
+            color=pexpress_speed_color,
+            marker="P",
+            markersize=5.2,
+            linewidth=2.8,
+            linestyle=(0, (3, 2, 1, 2)),
+            markeredgecolor="white",
+            markeredgewidth=0.8,
+            zorder=4,
+            label="P-Express Speedup",
         )[0])
     speed_base = ax_speed.axhline(
         r["dflash_speedup"],
@@ -314,6 +349,21 @@ def plot_case_study(
             zorder=5,
             label="MDFlash Acc. Length",
         )[0])
+    if r["pexpress_acceptances"]:
+        pexpress_budgets = sorted(r["pexpress_acceptances"])
+        accept_handles.append(ax_accept.plot(
+            pexpress_budgets,
+            [r["pexpress_acceptances"][tb] for tb in pexpress_budgets],
+            color=pexpress_accept_color,
+            marker="v",
+            markersize=4.8,
+            linewidth=2.8,
+            linestyle=(0, (3, 2, 1, 2)),
+            markeredgecolor="white",
+            markeredgewidth=0.8,
+            zorder=5,
+            label="P-Express Acc. Length",
+        )[0])
     accept_base = ax_accept.axhline(
         r["dflash_acceptance"],
         color=baseline_color,
@@ -338,9 +388,11 @@ def plot_case_study(
     all_speed_values = [r["dflash_speedup"]]
     all_speed_values.extend(r["ddtree_speedups"].values())
     all_speed_values.extend(r["mdflash_speedups"].values())
+    all_speed_values.extend(r["pexpress_speedups"].values())
     all_accept_values = [r["dflash_acceptance"]]
     all_accept_values.extend(r["ddtree_acceptances"].values())
     all_accept_values.extend(r["mdflash_acceptances"].values())
+    all_accept_values.extend(r["pexpress_acceptances"].values())
     speed_bottom = max(1.0, min(all_speed_values) * 0.92)
     accept_bottom = max(1.0, min(all_accept_values) * 0.92)
     speed_top = max(all_speed_values) * 1.12
@@ -368,7 +420,7 @@ def plot_case_study(
         loc="upper center",
         bbox_to_anchor=(0.5, 0.98),
         frameon=False,
-        ncol=3,
+        ncol=4,
         columnspacing=1.6,
         handlelength=2.8,
     )
@@ -386,7 +438,7 @@ def plot_acceptance_distribution(
     model: str,
     temperature: float,
 ) -> None:
-    """Acceptance-length histogram for DFlash vs best-speedup DDTree and MDFlash budgets."""
+    """Acceptance-length histogram for DFlash and the best-speedup tree methods."""
     sdpa, flash = find_run_pair(runs_dir, dataset, model, temperature)
     best_baseline = best_run_data(sdpa, flash, "baseline")
     baseline_tpt = mean_time_per_token(best_baseline, "baseline")
@@ -412,6 +464,18 @@ def plot_acceptance_distribution(
             key=lambda key: baseline_tpt / mean_time_per_token(sdpa, key),
         )
         best_mdflash_budget = int(best_mdflash_key.removeprefix("mdflash_tb"))
+    pexpress_keys = sorted(
+        [k for k in sdpa["responses"][0] if k.startswith("pexpress_tb")],
+        key=lambda k: int(k.removeprefix("pexpress_tb")),
+    )
+    best_pexpress_key = None
+    best_pexpress_budget = None
+    if pexpress_keys:
+        best_pexpress_key = max(
+            pexpress_keys,
+            key=lambda key: baseline_tpt / mean_time_per_token(sdpa, key),
+        )
+        best_pexpress_budget = int(best_pexpress_key.removeprefix("pexpress_tb"))
 
     _setup_latex_rcparams()
     plt.rcParams.update({
@@ -424,49 +488,44 @@ def plot_acceptance_distribution(
     dflash_lengths = flatten_acceptance_lengths(best_dflash, "dflash")
     ddtree_lengths = flatten_acceptance_lengths(sdpa, best_ddtree_key)
     mdflash_lengths = flatten_acceptance_lengths(sdpa, best_mdflash_key) if best_mdflash_key is not None else []
+    pexpress_lengths = flatten_acceptance_lengths(sdpa, best_pexpress_key) if best_pexpress_key is not None else []
 
-    max_accept_len = max([max(dflash_lengths), max(ddtree_lengths), max(mdflash_lengths) if mdflash_lengths else 0])
+    max_accept_len = max(
+        [
+            max(dflash_lengths),
+            max(ddtree_lengths),
+            max(mdflash_lengths) if mdflash_lengths else 0,
+            max(pexpress_lengths) if pexpress_lengths else 0,
+        ]
+    )
     x_values = np.arange(1, max_accept_len + 1)
-    dflash_counts = np.bincount(dflash_lengths, minlength=max_accept_len + 1)[1:max_accept_len + 1]
-    ddtree_counts = np.bincount(ddtree_lengths, minlength=max_accept_len + 1)[1:max_accept_len + 1]
-    dflash_dist = dflash_counts / dflash_counts.sum()
-    ddtree_dist = ddtree_counts / ddtree_counts.sum()
-    mdflash_dist = None
-    if mdflash_lengths:
-        mdflash_counts = np.bincount(mdflash_lengths, minlength=max_accept_len + 1)[1:max_accept_len + 1]
-        mdflash_dist = mdflash_counts / mdflash_counts.sum()
+    variant_specs = [
+        ("DFlash", dflash_lengths, "#4E79A7"),
+        (f"DDTree (B={best_budget})", ddtree_lengths, "#59A14F"),
+    ]
+    if best_mdflash_budget is not None and mdflash_lengths:
+        variant_specs.append((f"MDFlash (B={best_mdflash_budget})", mdflash_lengths, "#F28E2B"))
+    if best_pexpress_budget is not None and pexpress_lengths:
+        variant_specs.append((f"P-Express (B={best_pexpress_budget})", pexpress_lengths, "#9C6ADE"))
+
+    variant_dists = []
+    for label, lengths, color in variant_specs:
+        counts = np.bincount(lengths, minlength=max_accept_len + 1)[1:max_accept_len + 1]
+        variant_dists.append((label, counts / counts.sum(), color))
 
     fig, ax = plt.subplots(figsize=(8.2, 6.2))
-    width = 0.26 if mdflash_dist is not None else 0.38
-    ax.bar(
-        x_values - width if mdflash_dist is not None else x_values - width / 2,
-        dflash_dist,
-        width=width,
-        color="#4E79A7",
-        edgecolor="white",
-        linewidth=0.7,
-        label="DFlash",
-        zorder=3,
-    )
-    ax.bar(
-        x_values if mdflash_dist is not None else x_values + width / 2,
-        ddtree_dist,
-        width=width,
-        color="#59A14F",
-        edgecolor="white",
-        linewidth=0.7,
-        label=f"DDTree (B={best_budget})",
-        zorder=3,
-    )
-    if mdflash_dist is not None and best_mdflash_budget is not None:
+    num_variants = len(variant_dists)
+    width = min(0.78 / max(num_variants, 1), 0.38)
+    offsets = (np.arange(num_variants) - (num_variants - 1) / 2) * width
+    for offset, (label, dist_values, color) in zip(offsets, variant_dists):
         ax.bar(
-            x_values + width,
-            mdflash_dist,
+            x_values + offset,
+            dist_values,
             width=width,
-            color="#F28E2B",
+            color=color,
             edgecolor="white",
             linewidth=0.7,
-            label=f"MDFlash (B={best_mdflash_budget})",
+            label=label,
             zorder=3,
         )
 
@@ -475,11 +534,11 @@ def plot_acceptance_distribution(
     ax.set_xticks(x_values)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda val, _: f"{100 * val:.0f}%"))
     ax.set_xlim(0.4, max_accept_len + 0.6)
-    ymax = max(dflash_dist.max(), ddtree_dist.max(), mdflash_dist.max() if mdflash_dist is not None else 0.0)
+    ymax = max(dist_values.max() for _, dist_values, _ in variant_dists)
     ax.set_ylim(0.0, ymax * 1.12)
     ax.set_axisbelow(True)
     ax.grid(axis="y", color="#E6E6E6", linewidth=0.6, zorder=0)
-    fig.legend(loc="upper center", bbox_to_anchor=(0.5, 0.98), frameon=False, ncol=3 if mdflash_dist is not None else 2)
+    fig.legend(loc="upper center", bbox_to_anchor=(0.5, 0.98), frameon=False, ncol=min(num_variants, 4))
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["left"].set_color("#CCCCCC")
@@ -517,10 +576,12 @@ def plot_bar_speeds(results: list[dict], output: Path) -> None:
     for r in results:
         key = (r["dataset"], r["model"])
         if key not in agg:
-            agg[key] = {"dflash": 0.0, "mdflash": 0.0, "ddtree": 0.0}
+            agg[key] = {"dflash": 0.0, "mdflash": 0.0, "pexpress": 0.0, "ddtree": 0.0}
         agg[key]["dflash"] = max(agg[key]["dflash"], r["dflash_speedup"])
         best_mdflash = max(r["mdflash_speedups"].values()) if r["mdflash_speedups"] else 0.0
         agg[key]["mdflash"] = max(agg[key]["mdflash"], best_mdflash)
+        best_pexpress = max(r["pexpress_speedups"].values()) if r["pexpress_speedups"] else 0.0
+        agg[key]["pexpress"] = max(agg[key]["pexpress"], best_pexpress)
         best_ddtree = max(r["ddtree_speedups"].values()) if r["ddtree_speedups"] else 0.0
         agg[key]["ddtree"] = max(agg[key]["ddtree"], best_ddtree)
 
@@ -540,10 +601,11 @@ def plot_bar_speeds(results: list[dict], output: Path) -> None:
     datasets = sorted(all_datasets, key=lambda d: DATASET_ORDER.get(d, 100))
     n_datasets = len(datasets)
 
-    # Layout per group: DFlash band, MDFlash band, DDTree band.
+    # Layout per group: DFlash band, MDFlash band, P-Express band, DDTree band.
     method_specs = [
         ("dflash", MODEL_COLORS_DFLASH, "DFlash"),
         ("mdflash", MODEL_COLORS_MDFLASH, "MDFlash"),
+        ("pexpress", MODEL_COLORS_PEXPRESS, "P-Express"),
         ("ddtree", MODEL_COLORS_DDTREE, "DDTree"),
     ]
     n_methods = len(method_specs)

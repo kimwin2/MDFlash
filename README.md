@@ -26,7 +26,9 @@ bash run_benchmark.sh
 ```
 
 This produces benchmark outputs in `runs/` and logs in `logs/`.
-The benchmark runner compares autoregressive decoding, DFlash, MDFlash, and DDTree in the same sweep.
+The benchmark runner compares autoregressive decoding, DFlash, MDFlash, P-Express, and DDTree in the same sweep.
+
+`run_benchmark.sh` also exposes `PEXPRESS_PERTURBATION_TEMPERATURE` and `PEXPRESS_POSITION_TEMPERATURE_DECAY` as environment-variable overrides for tuning the perturbation sweep. The default P-Express setup perturbs only the anchor copy and increases that perturbation magnitude across the drafter batch.
 
 ## Reproduce Paper Artifacts
 
