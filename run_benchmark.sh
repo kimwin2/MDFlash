@@ -39,6 +39,13 @@ MDFLASH_PROPOSAL_TEMPERATURE="${MDFLASH_PROPOSAL_TEMPERATURE:-1.0}"
 PEXPRESS_PERTURBATION_TEMPERATURE="${PEXPRESS_PERTURBATION_TEMPERATURE:-0.75}"
 PEXPRESS_POSITION_TEMPERATURE_DECAY="${PEXPRESS_POSITION_TEMPERATURE_DECAY:-0.0}"
 PFLASH_BRANCH_PRIOR_WEIGHT="${PFLASH_BRANCH_PRIOR_WEIGHT:-0.5}"
+PFLASH_MERGE_PREFIX_BRANCHES="${PFLASH_MERGE_PREFIX_BRANCHES:-0}"
+PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT="${PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT:-0.0}"
+
+PFLASH_EXTRA_BENCHMARK_ARGS=()
+if [[ "${PFLASH_MERGE_PREFIX_BRANCHES}" != "0" ]]; then
+  PFLASH_EXTRA_BENCHMARK_ARGS+=(--pflash-merge-prefix-branches)
+fi
 
 COMMON_BENCHMARK_ARGS=(
   --max-new-tokens 2048
@@ -46,6 +53,8 @@ COMMON_BENCHMARK_ARGS=(
   --pexpress-perturbation-temperature "${PEXPRESS_PERTURBATION_TEMPERATURE}"
   --pexpress-position-temperature-decay "${PEXPRESS_POSITION_TEMPERATURE_DECAY}"
   --pflash-branch-prior-weight "${PFLASH_BRANCH_PRIOR_WEIGHT}"
+  --pflash-prefix-support-bonus-weight "${PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT}"
+  "${PFLASH_EXTRA_BENCHMARK_ARGS[@]}"
 )
 
 slugify() {
@@ -99,7 +108,17 @@ for task in "${TASKS[@]}"; do
     draft_slug="$(slugify "${draft_name}")"
     for temperature in "${TEMPERATURES[@]}"; do
       temperature_slug="$(slugify "${temperature}")"
-      run_name="${dataset_name}__${model_slug}__${draft_slug}__temp${temperature_slug}"
+      config_suffix=""
+      if [[ "${MDFLASH_PROPOSAL_TEMPERATURE}" != "1.0" ]] \
+        || [[ "${PEXPRESS_PERTURBATION_TEMPERATURE}" != "0.75" ]] \
+        || [[ "${PEXPRESS_POSITION_TEMPERATURE_DECAY}" != "0.0" ]] \
+        || [[ "${PFLASH_BRANCH_PRIOR_WEIGHT}" != "0.5" ]] \
+        || [[ "${PFLASH_MERGE_PREFIX_BRANCHES}" != "0" ]] \
+        || [[ "${PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT}" != "0.0" ]]; then
+        config_slug="$(slugify "md${MDFLASH_PROPOSAL_TEMPERATURE}_pe${PEXPRESS_PERTURBATION_TEMPERATURE}_pd${PEXPRESS_POSITION_TEMPERATURE_DECAY}_pp${PFLASH_BRANCH_PRIOR_WEIGHT}_pm${PFLASH_MERGE_PREFIX_BRANCHES}_ps${PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT}")"
+        config_suffix="__cfg${config_slug}"
+      fi
+      run_name="${dataset_name}__${model_slug}__${draft_slug}__temp${temperature_slug}${config_suffix}"
 
       run_benchmark \
         "${dataset_name}" \

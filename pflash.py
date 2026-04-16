@@ -1,4 +1,5 @@
 import heapq
+import math
 import time
 from types import SimpleNamespace
 
@@ -39,7 +40,19 @@ def build_pflash_tree(
     draft_logits: torch.Tensor,
     budget: int,
     branch_log_priors: torch.Tensor | None = None,
+    merge_prefix_branches: bool = False,
+    prefix_support_bonus_weight: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, list[int], list[dict[int, int]], torch.Tensor, dict[str, float]]:
+    if prefix_support_bonus_weight < 0.0:
+        raise ValueError("prefix_support_bonus_weight must be non-negative.")
+    if merge_prefix_branches:
+        return build_merged_prefix_pflash_tree(
+            draft_logits=draft_logits,
+            budget=budget,
+            branch_log_priors=branch_log_priors,
+            prefix_support_bonus_weight=prefix_support_bonus_weight,
+        )
+
     build_subtimes = empty_stage_times(DDTREE_TREE_BUILD_STAGE_ORDER)
 
     if budget <= 0 or draft_logits.shape[0] == 0 or draft_logits.shape[1] == 0:
@@ -149,6 +162,187 @@ def build_pflash_tree(
     )
 
 
+def build_merged_prefix_pflash_tree(
+    draft_logits: torch.Tensor,
+    budget: int,
+    branch_log_priors: torch.Tensor | None = None,
+    prefix_support_bonus_weight: float = 0.0,
+) -> tuple[torch.Tensor, torch.Tensor, list[int], list[dict[int, int]], torch.Tensor, dict[str, float]]:
+    build_subtimes = empty_stage_times(DDTREE_TREE_BUILD_STAGE_ORDER)
+
+    if budget <= 0 or draft_logits.shape[0] == 0 or draft_logits.shape[1] == 0:
+        visibility = torch.zeros((1, 1), dtype=torch.bool)
+        visibility[0, 0] = True
+        return (
+            torch.empty(0, dtype=torch.long),
+            torch.empty(0, dtype=torch.long),
+            [-1],
+            [dict()],
+            visibility,
+            build_subtimes,
+        )
+
+    num_branches, depth_limit, vocab_size = draft_logits.shape
+    topk = min(budget, vocab_size)
+
+    copy_start = cuda_time()
+    logits = draft_logits.float()
+    top_logits, top_token_ids = torch.topk(logits, k=topk, dim=-1)
+    log_z = torch.logsumexp(logits, dim=-1, keepdim=True)
+    top_log_probs_cpu = (top_logits - log_z).to(device="cpu", dtype=torch.float32)
+    top_token_ids_cpu = top_token_ids.to(device="cpu", dtype=torch.long)
+    if branch_log_priors is None:
+        branch_log_priors_cpu = torch.zeros((num_branches,), dtype=torch.float32)
+    else:
+        branch_log_priors_cpu = branch_log_priors.to(device="cpu", dtype=torch.float32)
+    build_subtimes["tree_build_copy"] = cuda_time() - copy_start
+
+    top_log_probs_np = top_log_probs_cpu.numpy()
+    top_token_ids_np = top_token_ids_cpu.numpy()
+    branch_log_priors_np = branch_log_priors_cpu.numpy()
+
+    heap_start = time.perf_counter()
+    heap: list[tuple[float, tuple[int, ...], int]] = []
+    candidate_states: list[tuple[int, tuple[int, ...], int, int, float]] = []
+    prefix_entries: dict[tuple[int, ...], SimpleNamespace] = {}
+
+    def build_prefix_tokens(branch_idx: int, ranks: tuple[int, ...]) -> tuple[int, ...]:
+        return tuple(
+            int(top_token_ids_np[branch_idx, prefix_depth, prefix_rank])
+            for prefix_depth, prefix_rank in enumerate(ranks)
+        )
+
+    def aggregate_score(entry: SimpleNamespace) -> float:
+        support_count = len(entry.supporting_branches)
+        return float(entry.best_logw + prefix_support_bonus_weight * math.log1p(support_count))
+
+    def push_prefix_entry(prefix_tokens: tuple[int, ...], entry: SimpleNamespace) -> None:
+        heapq.heappush(heap, (-aggregate_score(entry), prefix_tokens, entry.version))
+
+    def add_candidate_state(
+        branch_idx: int,
+        ranks: tuple[int, ...],
+        depth: int,
+        rank: int,
+        logw: float,
+    ) -> None:
+        prefix_tokens = build_prefix_tokens(branch_idx, ranks)
+        state_id = len(candidate_states)
+        candidate_states.append((branch_idx, ranks, depth, rank, logw))
+
+        entry = prefix_entries.get(prefix_tokens)
+        if entry is None:
+            entry = SimpleNamespace(
+                best_logw=logw,
+                supporting_branches={branch_idx},
+                pending_state_ids=[state_id],
+                in_tree=False,
+                version=0,
+            )
+            prefix_entries[prefix_tokens] = entry
+        else:
+            if logw > entry.best_logw:
+                entry.best_logw = logw
+            entry.supporting_branches.add(branch_idx)
+            entry.pending_state_ids.append(state_id)
+            entry.version += 1
+
+        push_prefix_entry(prefix_tokens, entry)
+
+    for branch_idx in range(num_branches):
+        first_logw = float(branch_log_priors_np[branch_idx] + top_log_probs_np[branch_idx, 0, 0])
+        add_candidate_state(
+            branch_idx=branch_idx,
+            ranks=(0,),
+            depth=1,
+            rank=0,
+            logw=first_logw,
+        )
+
+    parents = [-1]
+    child_maps: list[dict[int, int]] = [dict()]
+    node_token_ids: list[int] = []
+    node_depths: list[int] = []
+    tree_full = False
+
+    while heap and len(node_token_ids) < budget:
+        _, prefix_tokens, version = heapq.heappop(heap)
+        entry = prefix_entries.get(prefix_tokens)
+        if entry is None or version != entry.version or not entry.pending_state_ids:
+            continue
+
+        pending_state_ids = entry.pending_state_ids
+        entry.pending_state_ids = []
+        entry.version += 1
+
+        if not entry.in_tree:
+            current_index = 0
+            for prefix_depth, token_id in enumerate(prefix_tokens, start=1):
+                child_index = child_maps[current_index].get(token_id)
+                if child_index is None:
+                    if len(node_token_ids) >= budget:
+                        tree_full = True
+                        break
+                    child_index = len(parents)
+                    parents.append(current_index)
+                    child_maps.append(dict())
+                    child_maps[current_index][token_id] = child_index
+                    node_token_ids.append(token_id)
+                    node_depths.append(prefix_depth)
+                current_index = child_index
+            entry.in_tree = True
+        if tree_full:
+            break
+
+        for state_id in pending_state_ids:
+            branch_idx, ranks, depth, rank, logw = candidate_states[state_id]
+
+            if rank + 1 < topk:
+                sibling_ranks = ranks[:-1] + (rank + 1,)
+                sibling_logw = logw - float(top_log_probs_np[branch_idx, depth - 1, rank]) + float(
+                    top_log_probs_np[branch_idx, depth - 1, rank + 1]
+                )
+                add_candidate_state(
+                    branch_idx=branch_idx,
+                    ranks=sibling_ranks,
+                    depth=depth,
+                    rank=rank + 1,
+                    logw=sibling_logw,
+                )
+
+            if depth < depth_limit:
+                child_ranks = ranks + (0,)
+                child_logw = logw + float(top_log_probs_np[branch_idx, depth, 0])
+                add_candidate_state(
+                    branch_idx=branch_idx,
+                    ranks=child_ranks,
+                    depth=depth + 1,
+                    rank=0,
+                    logw=child_logw,
+                )
+
+    build_subtimes["tree_build_heap"] = time.perf_counter() - heap_start
+
+    visibility_start = time.perf_counter()
+    current_length = 1 + len(node_token_ids)
+    visibility_np = np.zeros((current_length, current_length), dtype=np.bool_)
+    visibility_np[0, 0] = True
+    for index in range(1, current_length):
+        parent_index = parents[index]
+        visibility_np[index, :index] = visibility_np[parent_index, :index]
+        visibility_np[index, index] = True
+    build_subtimes["tree_build_visibility"] = time.perf_counter() - visibility_start
+
+    return (
+        torch.tensor(node_token_ids, dtype=torch.long),
+        torch.tensor(node_depths, dtype=torch.long),
+        parents,
+        child_maps,
+        torch.from_numpy(visibility_np),
+        build_subtimes,
+    )
+
+
 @torch.inference_mode()
 def pflash_generate(
     model: DFlashDraftModel,
@@ -163,6 +357,8 @@ def pflash_generate(
     perturbation_temperature: float = 0.75,
     position_temperature_decay: float = 0.0,
     branch_prior_weight: float = 0.5,
+    merge_prefix_branches: bool = False,
+    prefix_support_bonus_weight: float = 0.0,
     save_tree_traces: bool = False,
 ) -> SimpleNamespace:
     if block_size <= 1:
@@ -276,6 +472,8 @@ def pflash_generate(
             draft_logits=draft_logits,
             budget=tree_budget,
             branch_log_priors=branch_log_priors,
+            merge_prefix_branches=merge_prefix_branches,
+            prefix_support_bonus_weight=prefix_support_bonus_weight,
         )
         stage_times["tree_build"] += cuda_time() - tree_build_start
         for stage_name, stage_elapsed in tree_build_subtimes.items():
