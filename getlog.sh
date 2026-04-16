@@ -102,7 +102,7 @@ def print_pair_sanity_checks(data):
     checked_pairs = []
 
     for method in sorted(methods):
-        for prefix in ("pflash_v2_tb", "pflash_v3_tb", "pflash_v4_tb"):
+        for prefix in ("pflash_v2_tb", "pflash_v3_tb", "pflash_v4_tb", "pflash_v5_tb"):
             if not method.startswith(prefix):
                 continue
             budget = method.removeprefix(prefix)
@@ -247,6 +247,7 @@ def print_single_result(data, filename):
         "pflash_v2_budget",
         "pflash_v3_budget",
         "pflash_v4_budget",
+        "pflash_v5_budget",
         "pexpress_perturbation_temperature",
         "pexpress_position_temperature_decay",
         "pflash_branch_prior_weight",
@@ -256,6 +257,9 @@ def print_single_result(data, filename):
         "pflash_v4_support_bonus_weight",
         "pflash_v4_base_gap_penalty",
         "pflash_v4_graft_score_threshold",
+        "pflash_v5_high_agreement_threshold",
+        "pflash_v5_mid_agreement_threshold",
+        "pflash_v5_low_agreement_depth",
         "measure_batch_agreement",
     ):
         print("  {}={}".format(name, args.get(name, "N/A")))
