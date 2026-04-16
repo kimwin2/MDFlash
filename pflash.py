@@ -219,10 +219,27 @@ def build_merged_prefix_pflash_tree(
 
     def aggregate_score(entry: SimpleNamespace) -> float:
         support_count = len(entry.supporting_branches)
-        return float(entry.best_logw + prefix_support_bonus_weight * math.log1p(support_count))
+        return float(entry.representative_logw + prefix_support_bonus_weight * math.log1p(support_count))
 
     def push_prefix_entry(prefix_tokens: tuple[int, ...], entry: SimpleNamespace) -> None:
         heapq.heappush(heap, (-aggregate_score(entry), prefix_tokens, entry.version))
+
+    def should_promote_representative(
+        entry: SimpleNamespace,
+        branch_idx: int,
+        logw: float,
+        state_id: int,
+    ) -> bool:
+        representative_branch_idx = entry.representative_branch_idx
+        if branch_idx == 0 and representative_branch_idx != 0:
+            return True
+        if branch_idx != 0 and representative_branch_idx == 0:
+            return False
+        if logw > entry.representative_logw:
+            return True
+        if logw < entry.representative_logw:
+            return False
+        return state_id < entry.representative_state_id
 
     def add_candidate_state(
         branch_idx: int,
@@ -238,18 +255,24 @@ def build_merged_prefix_pflash_tree(
         entry = prefix_entries.get(prefix_tokens)
         if entry is None:
             entry = SimpleNamespace(
-                best_logw=logw,
                 supporting_branches={branch_idx},
                 pending_state_ids=[state_id],
                 in_tree=False,
+                representative_state_id=state_id,
+                representative_branch_idx=branch_idx,
+                representative_logw=logw,
                 version=0,
             )
             prefix_entries[prefix_tokens] = entry
         else:
-            if logw > entry.best_logw:
-                entry.best_logw = logw
             entry.supporting_branches.add(branch_idx)
+            if entry.in_tree:
+                return
             entry.pending_state_ids.append(state_id)
+            if should_promote_representative(entry, branch_idx, logw, state_id):
+                entry.representative_state_id = state_id
+                entry.representative_branch_idx = branch_idx
+                entry.representative_logw = logw
             entry.version += 1
 
         push_prefix_entry(prefix_tokens, entry)
@@ -276,7 +299,6 @@ def build_merged_prefix_pflash_tree(
         if entry is None or version != entry.version or not entry.pending_state_ids:
             continue
 
-        pending_state_ids = entry.pending_state_ids
         entry.pending_state_ids = []
         entry.version += 1
 
@@ -299,32 +321,32 @@ def build_merged_prefix_pflash_tree(
         if tree_full:
             break
 
-        for state_id in pending_state_ids:
-            branch_idx, ranks, depth, rank, logw = candidate_states[state_id]
+        representative_state_id = entry.representative_state_id
+        branch_idx, ranks, depth, rank, logw = candidate_states[representative_state_id]
 
-            if rank + 1 < topk:
-                sibling_ranks = ranks[:-1] + (rank + 1,)
-                sibling_logw = logw - float(top_log_probs_np[branch_idx, depth - 1, rank]) + float(
-                    top_log_probs_np[branch_idx, depth - 1, rank + 1]
-                )
-                add_candidate_state(
-                    branch_idx=branch_idx,
-                    ranks=sibling_ranks,
-                    depth=depth,
-                    rank=rank + 1,
-                    logw=sibling_logw,
-                )
+        if rank + 1 < topk:
+            sibling_ranks = ranks[:-1] + (rank + 1,)
+            sibling_logw = logw - float(top_log_probs_np[branch_idx, depth - 1, rank]) + float(
+                top_log_probs_np[branch_idx, depth - 1, rank + 1]
+            )
+            add_candidate_state(
+                branch_idx=branch_idx,
+                ranks=sibling_ranks,
+                depth=depth,
+                rank=rank + 1,
+                logw=sibling_logw,
+            )
 
-            if depth < depth_limit:
-                child_ranks = ranks + (0,)
-                child_logw = logw + float(top_log_probs_np[branch_idx, depth, 0])
-                add_candidate_state(
-                    branch_idx=branch_idx,
-                    ranks=child_ranks,
-                    depth=depth + 1,
-                    rank=0,
-                    logw=child_logw,
-                )
+        if depth < depth_limit:
+            child_ranks = ranks + (0,)
+            child_logw = logw + float(top_log_probs_np[branch_idx, depth, 0])
+            add_candidate_state(
+                branch_idx=branch_idx,
+                ranks=child_ranks,
+                depth=depth + 1,
+                rank=0,
+                logw=child_logw,
+            )
 
     build_subtimes["tree_build_heap"] = time.perf_counter() - heap_start
 
