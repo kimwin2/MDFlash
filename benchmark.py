@@ -329,11 +329,17 @@ def main() -> None:
         _ = run_method(method_key, warmup_input_ids, warmup_max_new_tokens)
 
     responses = []
-    indices = range(dist.rank(), len(dataset), dist.size())
+    response_metadata = []
+    indices = list(range(dist.rank(), len(dataset), dist.size()))
+    logger.info(
+        f"Rank {dist.rank()}/{dist.size()} assigned {len(indices)} sample(s): "
+        f"{indices[:16]}{'...' if len(indices) > 16 else ''}"
+    )
     for idx in tqdm(indices, disable=not dist.is_main()):
         instance = dataset[idx]
         messages = []
-        for user_content in instance["turns"]:
+        turns = list(instance["turns"])
+        for turn_idx, user_content in enumerate(turns):
             messages.append({"role": "user", "content": user_content})
             input_text = tokenizer.apply_chat_template(
                 messages,
@@ -362,15 +368,37 @@ def main() -> None:
             output_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
             messages.append({"role": "assistant", "content": output_text})
             responses.append(response)
+            response_metadata.append({
+                "dataset_index": int(idx),
+                "turn_index": int(turn_idx),
+                "num_turns": int(len(turns)),
+                "rank": int(dist.rank()),
+            })
 
     if dist.size() > 1:
-        responses = dist.gather(responses, dst=0)
+        gathered = dist.gather({
+            "responses": responses,
+            "response_metadata": response_metadata,
+        }, dst=0)
         if not dist.is_main():
             return
-        responses = list(chain(*responses))
+        responses = list(chain.from_iterable(shard["responses"] for shard in gathered))
+        response_metadata = list(chain.from_iterable(shard["response_metadata"] for shard in gathered))
+
+    response_order = sorted(
+        range(len(response_metadata)),
+        key=lambda index: (
+            response_metadata[index]["dataset_index"],
+            response_metadata[index]["turn_index"],
+            response_metadata[index]["rank"],
+        ),
+    )
+    responses = [responses[index] for index in response_order]
+    response_metadata = [response_metadata[index] for index in response_order]
 
     run_data = {
         "responses": responses,
+        "response_metadata": response_metadata,
         "block_size": block_size,
         "draft_attn_implementation": draft_attn_implementation,
         "target_attn_implementation": target_attn_implementation,

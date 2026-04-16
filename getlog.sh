@@ -12,7 +12,7 @@ python3 <<'PY'
 import glob
 import os
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 import torch
 
@@ -53,6 +53,7 @@ def load_and_analyze(pt_path):
     return {
         "methods": methods,
         "responses": responses,
+        "response_metadata": data.get("response_metadata", []),
         "results": dict(results),
         "args": data.get("args", {}),
         "block_size": data.get("block_size", "N/A"),
@@ -140,6 +141,36 @@ def print_pair_sanity_checks(data):
             f"stage={same_stage_times}/{count}, "
             f"round_ts={same_round_timestamps}/{count}"
         )
+
+
+def print_sample_coverage(data):
+    metadata = data.get("response_metadata") or []
+    responses = data["responses"]
+    if not metadata:
+        print("-" * 120)
+        print("Sample coverage metadata: unavailable. Re-run benchmark.py after the metadata patch to check duplicates.")
+        return
+
+    print("-" * 120)
+    print("Sample coverage")
+    if len(metadata) != len(responses):
+        print(f"  WARNING: metadata count {len(metadata)} != response count {len(responses)}")
+
+    keys = [
+        (int(item.get("dataset_index", -1)), int(item.get("turn_index", -1)))
+        for item in metadata
+    ]
+    key_counts = Counter(keys)
+    duplicate_keys = sorted(key for key, count in key_counts.items() if count > 1)
+    rank_counts = Counter(int(item.get("rank", -1)) for item in metadata)
+    sample_counts = Counter(int(item.get("dataset_index", -1)) for item in metadata)
+
+    print(f"  response_entries={len(responses)}, unique_sample_turns={len(key_counts)}, duplicate_sample_turns={len(duplicate_keys)}")
+    print("  rank_counts: " + ", ".join(f"rank{rank}={count}" for rank, count in sorted(rank_counts.items())))
+    print(f"  unique_samples={len(sample_counts)}, sample_turn_count_range={min(sample_counts.values())}-{max(sample_counts.values())}")
+    if duplicate_keys:
+        preview = duplicate_keys[:12]
+        print("  duplicate keys preview: " + ", ".join(f"sample{idx}/turn{turn}" for idx, turn in preview))
 
 
 def summarize_adaptive_modes(metrics):
@@ -365,6 +396,7 @@ def print_single_result(data, filename):
 
     print_batch_agreement_summary(data)
     print_pair_sanity_checks(data)
+    print_sample_coverage(data)
     print()
 
 
