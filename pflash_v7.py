@@ -181,6 +181,8 @@ def pflash_v7_generate(
             use_cache=True,
             is_causal=False,
         )[:, -draft_horizon:, :])
+        past_key_values_draft = select_dynamic_cache_batch(draft_past_key_values, 0)
+        past_key_values_draft.crop(start)
         draft_stage_elapsed = cuda_time() - draft_stage_start
         if draft_prefill:
             draft_prefill = False
@@ -225,9 +227,6 @@ def pflash_v7_generate(
 
         past_key_values_target = select_dynamic_cache_batch(verify_past_key_values, selected_branch_idx)
         past_key_values_target.crop(start + accepted_length)
-
-        past_key_values_draft = select_dynamic_cache_batch(draft_past_key_values, selected_branch_idx)
-        past_key_values_draft.crop(start + accepted_length)
 
         target_hidden_batch = extract_context_feature(output.hidden_states, model.target_layer_ids)
         target_hidden = target_hidden_batch[selected_branch_idx : selected_branch_idx + 1, :accepted_length, :]
