@@ -637,6 +637,109 @@ def print_pflash_v10_summary(data):
     print("  AltPick is the fraction of rounds where the deepest DDTree came from a non-base anchor; SelAcc is the acceptance length of the single verified tree.")
 
 
+def summarize_pflash_v11_metrics(metrics):
+    if not metrics:
+        return None
+
+    rounds = len(metrics)
+    branch_pick_counts = Counter(int(metric.get("selected_branch", -1)) for metric in metrics)
+    alt_branch_selected = sum(1 for metric in metrics if bool(metric.get("alternative_branch_selected", False)))
+    base_confidence = [float(metric.get("base_branch_confidence", 0.0)) for metric in metrics]
+    selected_confidence = [float(metric.get("selected_branch_confidence", 0.0)) for metric in metrics]
+    confidence_margin = [float(metric.get("confidence_margin", 0.0)) for metric in metrics]
+    selected_depths = [float(metric.get("selected_tree_depth", 0.0)) for metric in metrics]
+    selected_acceptance = [float(metric.get("selected_acceptance_length", 0.0)) for metric in metrics]
+    selected_ranks = [
+        float(metric["selected_anchor_rank"])
+        for metric in metrics
+        if metric.get("selected_anchor_rank") is not None
+    ]
+
+    return {
+        "rounds": rounds,
+        "confidence_metric": str(metrics[0].get("confidence_metric", "N/A")),
+        "alt_pick_rate": alt_branch_selected / rounds if rounds else None,
+        "avg_base_confidence": sum(base_confidence) / rounds if rounds else None,
+        "avg_selected_confidence": sum(selected_confidence) / rounds if rounds else None,
+        "avg_confidence_gain": (sum(selected_confidence) - sum(base_confidence)) / rounds if rounds else None,
+        "avg_confidence_margin": sum(confidence_margin) / rounds if rounds else None,
+        "avg_selected_rank": sum(selected_ranks) / len(selected_ranks) if selected_ranks else None,
+        "avg_selected_depth": sum(selected_depths) / rounds if rounds else None,
+        "avg_selected_acceptance": sum(selected_acceptance) / rounds if rounds else None,
+        "avg_tree_nodes": (
+            sum(float(metric.get("tree_node_count", 0.0)) for metric in metrics) / rounds
+            if any("tree_node_count" in metric for metric in metrics)
+            else None
+        ),
+        "branch_pick_counts": [int(branch_pick_counts.get(branch_idx, 0)) for branch_idx in range(4)],
+    }
+
+
+def print_pflash_v11_summary(data):
+    rows = []
+    responses = data["responses"]
+    for method in data["methods"]:
+        collected_metrics = []
+        for response in responses:
+            result = response.get(method)
+            if result is None:
+                continue
+            collected_metrics.extend(getattr(result, "pflash_v11_metrics", None) or [])
+        summary = summarize_pflash_v11_metrics(collected_metrics)
+        if summary is not None:
+            rows.append((method, summary))
+
+    if not rows:
+        return
+
+    def fmt(value):
+        return "N/A" if value is None else f"{value:.3f}"
+
+    print("-" * 140)
+    print("P-Flash V11 confidence-routed single tree")
+    print(
+        "{:<20} | {:>7} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8} | {:>7} | {:>7} | {:>8} | {:>8} | {:>6} | {:>6} | {:>6} | {:>6}".format(
+            "Method",
+            "Rounds",
+            "AltPick",
+            "BaseConf",
+            "SelConf",
+            "Gain",
+            "Gap",
+            "SelRank",
+            "TreeD",
+            "SelAcc",
+            "AvgTree",
+            "B0",
+            "B1",
+            "B2",
+            "B3",
+        )
+    )
+    print("-" * 140)
+    for method, summary in rows:
+        print(
+            "{:<20} | {:>7} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8} | {:>7} | {:>7} | {:>8} | {:>8} | {:>6} | {:>6} | {:>6} | {:>6}".format(
+                method,
+                summary["rounds"],
+                fmt(summary["alt_pick_rate"]),
+                fmt(summary["avg_base_confidence"]),
+                fmt(summary["avg_selected_confidence"]),
+                fmt(summary["avg_confidence_gain"]),
+                fmt(summary["avg_confidence_margin"]),
+                fmt(summary["avg_selected_rank"]),
+                fmt(summary["avg_selected_depth"]),
+                fmt(summary["avg_selected_acceptance"]),
+                fmt(summary["avg_tree_nodes"]),
+                summary["branch_pick_counts"][0],
+                summary["branch_pick_counts"][1],
+                summary["branch_pick_counts"][2],
+                summary["branch_pick_counts"][3],
+            )
+        )
+    print(f"  Confidence is the pre-tree `{rows[0][1]['confidence_metric']}` score computed from draft logits; only the selected branch builds a DDTree.")
+
+
 def _score_ranking(scores):
     order = sorted(range(len(scores)), key=lambda idx: (-scores[idx], idx))
     ranks = [0] * len(scores)
@@ -961,6 +1064,7 @@ def print_single_result(data, filename):
         "pflash_v8_budget",
         "pflash_v9_budget",
         "pflash_v10_budget",
+        "pflash_v11_budget",
         "exp_ddtree_budget",
         "exp_predictmv",
         "pexpress_perturbation_temperature",
@@ -1014,6 +1118,7 @@ def print_single_result(data, filename):
     print_pflash_v8_summary(data)
     print_pflash_v9_summary(data)
     print_pflash_v10_summary(data)
+    print_pflash_v11_summary(data)
     print_pair_sanity_checks(data)
     print_sample_coverage(data)
     print()
