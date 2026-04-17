@@ -10,6 +10,7 @@ export GETLOG_DIR="${DIR}"
 
 python3 <<'PY'
 import glob
+import math
 import os
 import sys
 from collections import Counter, defaultdict
@@ -538,6 +539,189 @@ def print_pflash_v9_summary(data):
     print("  AvgTree is the average total number of non-root nodes across the four independent per-branch trees.")
 
 
+def _score_ranking(scores):
+    order = sorted(range(len(scores)), key=lambda idx: (-scores[idx], idx))
+    ranks = [0] * len(scores)
+    for rank, idx in enumerate(order, start=1):
+        ranks[idx] = rank
+    return order, ranks
+
+
+def summarize_exp_predictmv_metrics(metrics):
+    if not metrics:
+        return [], []
+
+    predictor_stats = {}
+    context_stats = {}
+
+    for metric in metrics:
+        selected_branch = int(metric.get("selected_branch", 0))
+        branch_acceptance_lengths = [float(value) for value in metric.get("branch_acceptance_lengths", [])]
+        winner_margin = float(metric.get("winner_margin", 0.0))
+        alt_win = 1.0 if bool(metric.get("alternative_branch_selected", False)) else 0.0
+
+        predictor_scores = metric.get("predictor_scores", {})
+        for predictor_name, raw_scores in predictor_scores.items():
+            if len(raw_scores) != len(branch_acceptance_lengths) or not raw_scores:
+                continue
+            scores = [float(value) for value in raw_scores]
+            if not all(math.isfinite(value) for value in scores):
+                continue
+
+            stat = predictor_stats.setdefault(predictor_name, {
+                "rounds": 0,
+                "wins": 0,
+                "top2_hits": 0,
+                "selected_rank_sum": 0.0,
+                "score_values": [],
+                "acceptance_values": [],
+                "selected_labels": [],
+            })
+            order, ranks = _score_ranking(scores)
+            stat["rounds"] += 1
+            stat["wins"] += int(order[0] == selected_branch)
+            stat["top2_hits"] += int(selected_branch in order[:2])
+            stat["selected_rank_sum"] += float(ranks[selected_branch])
+            stat["score_values"].extend(scores)
+            stat["acceptance_values"].extend(branch_acceptance_lengths)
+            stat["selected_labels"].extend([1.0 if branch_idx == selected_branch else 0.0 for branch_idx in range(len(scores))])
+
+        for context_name, raw_value in (metric.get("context_features", {}) or {}).items():
+            if raw_value is None:
+                continue
+            value = float(raw_value)
+            if not math.isfinite(value):
+                continue
+            stat = context_stats.setdefault(context_name, {
+                "values": [],
+                "winner_margins": [],
+                "alt_wins": [],
+            })
+            stat["values"].append(value)
+            stat["winner_margins"].append(winner_margin)
+            stat["alt_wins"].append(alt_win)
+
+    predictor_rows = []
+    for predictor_name, stat in predictor_stats.items():
+        rounds = int(stat["rounds"])
+        predictor_rows.append({
+            "predictor": predictor_name,
+            "rounds": rounds,
+            "win_acc": (stat["wins"] / rounds) if rounds else None,
+            "top2_acc": (stat["top2_hits"] / rounds) if rounds else None,
+            "avg_selected_rank": (stat["selected_rank_sum"] / rounds) if rounds else None,
+            "acc_len_pearson": pearson_correlation(stat["score_values"], stat["acceptance_values"]),
+            "selected_pearson": pearson_correlation(stat["score_values"], stat["selected_labels"]),
+        })
+    predictor_rows.sort(
+        key=lambda row: (
+            -1.0 if row["win_acc"] is None else -row["win_acc"],
+            999.0 if row["avg_selected_rank"] is None else row["avg_selected_rank"],
+            row["predictor"],
+        )
+    )
+
+    context_rows = []
+    for context_name, stat in context_stats.items():
+        context_rows.append({
+            "context": context_name,
+            "rounds": len(stat["values"]),
+            "avg_value": (sum(stat["values"]) / len(stat["values"])) if stat["values"] else None,
+            "margin_pearson": pearson_correlation(stat["values"], stat["winner_margins"]),
+            "alt_win_pearson": pearson_correlation(stat["values"], stat["alt_wins"]),
+        })
+    context_rows.sort(
+        key=lambda row: (
+            0.0 if row["margin_pearson"] is None else -abs(row["margin_pearson"]),
+            row["context"],
+        )
+    )
+    return predictor_rows, context_rows
+
+
+def print_exp_predictmv_summary(data):
+    rows = []
+    context_rows = []
+    responses = data["responses"]
+    for method in data["methods"]:
+        collected_metrics = []
+        for response in responses:
+            result = response.get(method)
+            if result is None:
+                continue
+            collected_metrics.extend(getattr(result, "exp_predictmv_metrics", None) or [])
+        predictor_rows, method_context_rows = summarize_exp_predictmv_metrics(collected_metrics)
+        if predictor_rows:
+            rows.extend((method, row) for row in predictor_rows)
+        if method_context_rows:
+            context_rows.extend((method, row) for row in method_context_rows)
+
+    if not rows:
+        return
+
+    def fmt(value):
+        return "N/A" if value is None else f"{value:.3f}"
+
+    print("-" * 140)
+    print("Exp-PredictMV branch winner predictors")
+    print(
+        "{:<20} | {:<28} | {:>7} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8}".format(
+            "Method",
+            "Predictor",
+            "Rounds",
+            "WinAcc",
+            "Top2Acc",
+            "SelRank",
+            "Len r",
+            "Sel r",
+        )
+    )
+    print("-" * 140)
+    for method, row in rows:
+        print(
+            "{:<20} | {:<28} | {:>7} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8}".format(
+                method,
+                row["predictor"][:28],
+                row["rounds"],
+                fmt(row["win_acc"]),
+                fmt(row["top2_acc"]),
+                fmt(row["avg_selected_rank"]),
+                fmt(row["acc_len_pearson"]),
+                fmt(row["selected_pearson"]),
+            )
+        )
+    print("  WinAcc is exact selected-branch accuracy before verify; Len r is branch-score Pearson against actual acceptance length.")
+
+    if not context_rows:
+        return
+
+    print("-" * 140)
+    print("Exp-PredictMV round context")
+    print(
+        "{:<20} | {:<28} | {:>7} | {:>8} | {:>9} | {:>8}".format(
+            "Method",
+            "Context",
+            "Rounds",
+            "Avg",
+            "Margin r",
+            "AltWin r",
+        )
+    )
+    print("-" * 140)
+    for method, row in context_rows:
+        print(
+            "{:<20} | {:<28} | {:>7} | {:>8} | {:>9} | {:>8}".format(
+                method,
+                row["context"][:28],
+                row["rounds"],
+                fmt(row["avg_value"]),
+                fmt(row["margin_pearson"]),
+                fmt(row["alt_win_pearson"]),
+            )
+        )
+    print("  Margin r correlates the context scalar with the winner-vs-runner-up acceptance gap.")
+
+
 def print_batch_agreement_summary(data):
     rows = []
     bucket_rows = []
@@ -679,6 +863,7 @@ def print_single_result(data, filename):
         "pflash_v8_budget",
         "pflash_v9_budget",
         "exp_ddtree_budget",
+        "exp_predictmv",
         "pexpress_perturbation_temperature",
         "pexpress_position_temperature_decay",
         "pflash_branch_prior_weight",
@@ -725,6 +910,7 @@ def print_single_result(data, filename):
 
     print_batch_agreement_summary(data)
     print_exp_ddtree_summary(data)
+    print_exp_predictmv_summary(data)
     print_pflash_v7_summary(data)
     print_pflash_v8_summary(data)
     print_pflash_v9_summary(data)

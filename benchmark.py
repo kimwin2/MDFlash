@@ -25,6 +25,7 @@ from pflash_v7 import pflash_v7_generate
 from pflash_v8 import pflash_v8_generate
 from pflash_v9 import pflash_v9_generate
 from exp_ddtree import exp_ddtree_generate
+from exp_predictmv import exp_predictmv_generate
 
 
 def main() -> None:
@@ -46,6 +47,7 @@ def main() -> None:
     parser.add_argument("--pflash-v8-budget", type=str, default=None)
     parser.add_argument("--pflash-v9-budget", type=str, default=None)
     parser.add_argument("--exp-ddtree-budget", type=str, default=None)
+    parser.add_argument("--exp-predictmv", action="store_true")
     parser.add_argument("--pexpress-perturbation-temperature", type=float, default=0.75)
     parser.add_argument("--pexpress-position-temperature-decay", type=float, default=0.0)
     parser.add_argument("--pflash-branch-prior-weight", type=float, default=0.5)
@@ -166,6 +168,7 @@ def main() -> None:
         pflash_v8_method_keys = [f"pflash_v8_tb{tree_budget}" for tree_budget in pflash_v8_budgets]
         pflash_v9_method_keys = [f"pflash_v9_tb{tree_budget}" for tree_budget in pflash_v9_budgets]
         exp_ddtree_method_keys = [f"exp_ddtree_tb{tree_budget}" for tree_budget in exp_ddtree_budgets]
+        exp_predictmv_method_keys = ["exp_predictmv"] if args.exp_predictmv else []
         ddtree_method_keys = [f"ddtree_tb{tree_budget}" for tree_budget in tree_budgets]
         methods_to_run.extend(mdflash_method_keys)
         methods_to_run.extend(pexpress_method_keys)
@@ -179,6 +182,7 @@ def main() -> None:
         methods_to_run.extend(pflash_v8_method_keys)
         methods_to_run.extend(pflash_v9_method_keys)
         methods_to_run.extend(exp_ddtree_method_keys)
+        methods_to_run.extend(exp_predictmv_method_keys)
         methods_to_run.extend(ddtree_method_keys)
         method_key_to_tree_budget.update({f"mdflash_tb{tree_budget}": tree_budget for tree_budget in mdflash_budgets})
         method_key_to_tree_budget.update({f"pexpress_tb{tree_budget}": tree_budget for tree_budget in pexpress_budgets})
@@ -192,6 +196,7 @@ def main() -> None:
         method_key_to_tree_budget.update({f"pflash_v8_tb{tree_budget}": tree_budget for tree_budget in pflash_v8_budgets})
         method_key_to_tree_budget.update({f"pflash_v9_tb{tree_budget}": tree_budget for tree_budget in pflash_v9_budgets})
         method_key_to_tree_budget.update({f"exp_ddtree_tb{tree_budget}": tree_budget for tree_budget in exp_ddtree_budgets})
+        method_key_to_tree_budget["exp_predictmv"] = 0
         method_key_to_tree_budget.update({f"ddtree_tb{tree_budget}": tree_budget for tree_budget in tree_budgets})
     else:
         mdflash_method_keys = []
@@ -206,6 +211,7 @@ def main() -> None:
         pflash_v8_method_keys = []
         pflash_v9_method_keys = []
         exp_ddtree_method_keys = []
+        exp_predictmv_method_keys = []
         ddtree_method_keys = []
 
     def run_method(method_key: str, input_ids: torch.Tensor, max_new_tokens: int):
@@ -327,6 +333,11 @@ def main() -> None:
                 perturbation_temperature=args.pexpress_perturbation_temperature,
                 position_temperature_decay=args.pexpress_position_temperature_decay,
             )
+        if method_key == "exp_predictmv":
+            return exp_predictmv_generate(
+                **common_kwargs,
+                measure_batch_agreement=args.measure_batch_agreement,
+            )
         if method_key.startswith("ddtree_tb"):
             return ddtree_generate(**common_kwargs)
         raise ValueError(f"Unsupported method key: {method_key}")
@@ -353,6 +364,8 @@ def main() -> None:
         history_method_key = pflash_v8_method_keys[-1]
     elif pflash_v7_method_keys:
         history_method_key = pflash_v7_method_keys[-1]
+    elif exp_predictmv_method_keys:
+        history_method_key = exp_predictmv_method_keys[-1]
     elif pexpress_method_keys:
         history_method_key = pexpress_method_keys[-1]
     elif mdflash_method_keys:

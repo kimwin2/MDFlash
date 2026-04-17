@@ -116,6 +116,7 @@ PFLASH_V7_BUDGET="${PFLASH_V7_BUDGET:-}"
 PFLASH_V8_BUDGET="${PFLASH_V8_BUDGET:-}"
 PFLASH_V9_BUDGET="${PFLASH_V9_BUDGET:-}"
 EXP_DDTREE_BUDGET="${EXP_DDTREE_BUDGET:-}"
+EXP_PREDICTMV="${EXP_PREDICTMV:-0}"
 MEASURE_BATCH_AGREEMENT="${MEASURE_BATCH_AGREEMENT:-0}"
 
 PFLASH_EXTRA_BENCHMARK_ARGS=()
@@ -127,6 +128,9 @@ if [[ "${MEASURE_BATCH_AGREEMENT}" != "0" ]]; then
 fi
 if [[ -n "${EXP_DDTREE_BUDGET}" ]]; then
   PFLASH_EXTRA_BENCHMARK_ARGS+=(--exp-ddtree-budget "${EXP_DDTREE_BUDGET}")
+fi
+if [[ "${EXP_PREDICTMV}" != "0" ]]; then
+  PFLASH_EXTRA_BENCHMARK_ARGS+=(--exp-predictmv)
 fi
 if [[ -n "${PFLASH_V7_BUDGET}" ]]; then
   PFLASH_EXTRA_BENCHMARK_ARGS+=(--pflash-v7-budget "${PFLASH_V7_BUDGET}")
@@ -198,6 +202,7 @@ build_config_slug() {
   [[ -n "${PFLASH_V8_BUDGET}" ]] && parts+=("v8${PFLASH_V8_BUDGET}")
   [[ -n "${PFLASH_V9_BUDGET}" ]] && parts+=("v9${PFLASH_V9_BUDGET}")
   [[ -n "${EXP_DDTREE_BUDGET}" ]] && parts+=("edt${EXP_DDTREE_BUDGET}")
+  [[ "${EXP_PREDICTMV}" != "0" ]] && parts+=("epmv${EXP_PREDICTMV}")
   [[ "${MEASURE_BATCH_AGREEMENT}" != "0" ]] && parts+=("ba${MEASURE_BATCH_AGREEMENT}")
 
   local IFS="_"
