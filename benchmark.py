@@ -21,6 +21,7 @@ from pflash_v3 import pflash_v3_generate
 from pflash_v4 import pflash_v4_generate
 from pflash_v5 import pflash_v5_generate
 from pflash_v6 import pflash_v6_generate
+from pflash_v7 import pflash_v7_generate
 from exp_ddtree import exp_ddtree_generate
 
 
@@ -39,6 +40,7 @@ def main() -> None:
     parser.add_argument("--pflash-v4-budget", type=str, default=None)
     parser.add_argument("--pflash-v5-budget", type=str, default=None)
     parser.add_argument("--pflash-v6-budget", type=str, default=None)
+    parser.add_argument("--pflash-v7-budget", type=str, default=None)
     parser.add_argument("--exp-ddtree-budget", type=str, default=None)
     parser.add_argument("--pexpress-perturbation-temperature", type=float, default=0.75)
     parser.add_argument("--pexpress-position-temperature-decay", type=float, default=0.0)
@@ -141,6 +143,7 @@ def main() -> None:
     pflash_v4_budgets = tree_budgets if args.pflash_v4_budget is None else [int(tree_budget) for tree_budget in args.pflash_v4_budget.split(",")]
     pflash_v5_budgets = tree_budgets if args.pflash_v5_budget is None else [int(tree_budget) for tree_budget in args.pflash_v5_budget.split(",")]
     pflash_v6_budgets = tree_budgets if args.pflash_v6_budget is None else [int(tree_budget) for tree_budget in args.pflash_v6_budget.split(",")]
+    pflash_v7_budgets = [] if args.pflash_v7_budget is None else [int(tree_budget) for tree_budget in args.pflash_v7_budget.split(",")]
     exp_ddtree_budgets = [] if args.exp_ddtree_budget is None else [int(tree_budget) for tree_budget in args.exp_ddtree_budget.split(",")]
     methods_to_run = ["dflash"]
     method_key_to_tree_budget = {}
@@ -153,6 +156,7 @@ def main() -> None:
         pflash_v4_method_keys = [f"pflash_v4_tb{tree_budget}" for tree_budget in pflash_v4_budgets]
         pflash_v5_method_keys = [f"pflash_v5_tb{tree_budget}" for tree_budget in pflash_v5_budgets]
         pflash_v6_method_keys = [f"pflash_v6_tb{tree_budget}" for tree_budget in pflash_v6_budgets]
+        pflash_v7_method_keys = [f"pflash_v7_tb{tree_budget}" for tree_budget in pflash_v7_budgets]
         exp_ddtree_method_keys = [f"exp_ddtree_tb{tree_budget}" for tree_budget in exp_ddtree_budgets]
         ddtree_method_keys = [f"ddtree_tb{tree_budget}" for tree_budget in tree_budgets]
         methods_to_run.extend(mdflash_method_keys)
@@ -163,6 +167,7 @@ def main() -> None:
         methods_to_run.extend(pflash_v4_method_keys)
         methods_to_run.extend(pflash_v5_method_keys)
         methods_to_run.extend(pflash_v6_method_keys)
+        methods_to_run.extend(pflash_v7_method_keys)
         methods_to_run.extend(exp_ddtree_method_keys)
         methods_to_run.extend(ddtree_method_keys)
         method_key_to_tree_budget.update({f"mdflash_tb{tree_budget}": tree_budget for tree_budget in mdflash_budgets})
@@ -173,6 +178,7 @@ def main() -> None:
         method_key_to_tree_budget.update({f"pflash_v4_tb{tree_budget}": tree_budget for tree_budget in pflash_v4_budgets})
         method_key_to_tree_budget.update({f"pflash_v5_tb{tree_budget}": tree_budget for tree_budget in pflash_v5_budgets})
         method_key_to_tree_budget.update({f"pflash_v6_tb{tree_budget}": tree_budget for tree_budget in pflash_v6_budgets})
+        method_key_to_tree_budget.update({f"pflash_v7_tb{tree_budget}": tree_budget for tree_budget in pflash_v7_budgets})
         method_key_to_tree_budget.update({f"exp_ddtree_tb{tree_budget}": tree_budget for tree_budget in exp_ddtree_budgets})
         method_key_to_tree_budget.update({f"ddtree_tb{tree_budget}": tree_budget for tree_budget in tree_budgets})
     else:
@@ -184,6 +190,7 @@ def main() -> None:
         pflash_v4_method_keys = []
         pflash_v5_method_keys = []
         pflash_v6_method_keys = []
+        pflash_v7_method_keys = []
         exp_ddtree_method_keys = []
         ddtree_method_keys = []
 
@@ -283,6 +290,11 @@ def main() -> None:
                 low_tree_budget=args.pflash_v6_low_tree_budget,
                 measure_batch_agreement=args.measure_batch_agreement,
             )
+        if method_key.startswith("pflash_v7_tb"):
+            return pflash_v7_generate(
+                **common_kwargs,
+                measure_batch_agreement=args.measure_batch_agreement,
+            )
         if method_key.startswith("exp_ddtree_tb"):
             return exp_ddtree_generate(
                 **common_kwargs,
@@ -309,6 +321,8 @@ def main() -> None:
         history_method_key = pflash_v5_method_keys[-1]
     elif pflash_v6_method_keys:
         history_method_key = pflash_v6_method_keys[-1]
+    elif pflash_v7_method_keys:
+        history_method_key = pflash_v7_method_keys[-1]
     elif pexpress_method_keys:
         history_method_key = pexpress_method_keys[-1]
     elif mdflash_method_keys:

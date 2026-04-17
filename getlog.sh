@@ -332,6 +332,89 @@ def print_exp_ddtree_summary(data):
     print("  MeanAbs/MaxAbs compare the single-branch DDTree draft logits against batch-0 logits from the batched alignment pass.")
 
 
+def summarize_pflash_v7_metrics(metrics):
+    if not metrics:
+        return None
+
+    rounds = len(metrics)
+    branch_win_counts = Counter(int(metric.get("selected_branch", -1)) for metric in metrics)
+    alt_branch_selected = sum(1 for metric in metrics if bool(metric.get("alternative_branch_selected", False)))
+    base_acceptance = [float(metric.get("base_acceptance_length", 0.0)) for metric in metrics]
+    selected_acceptance = [float(metric.get("selected_acceptance_length", 0.0)) for metric in metrics]
+    selected_ranks = [
+        float(metric["selected_anchor_rank"])
+        for metric in metrics
+        if metric.get("selected_anchor_rank") is not None
+    ]
+
+    return {
+        "rounds": rounds,
+        "alt_win_rate": alt_branch_selected / rounds if rounds else None,
+        "avg_base_acceptance": sum(base_acceptance) / rounds if rounds else None,
+        "avg_selected_acceptance": sum(selected_acceptance) / rounds if rounds else None,
+        "avg_gain": (sum(selected_acceptance) - sum(base_acceptance)) / rounds if rounds else None,
+        "avg_selected_rank": sum(selected_ranks) / len(selected_ranks) if selected_ranks else None,
+        "branch_win_counts": [int(branch_win_counts.get(branch_idx, 0)) for branch_idx in range(4)],
+    }
+
+
+def print_pflash_v7_summary(data):
+    rows = []
+    responses = data["responses"]
+    for method in data["methods"]:
+        collected_metrics = []
+        for response in responses:
+            result = response.get(method)
+            if result is None:
+                continue
+            collected_metrics.extend(getattr(result, "pflash_v7_metrics", None) or [])
+        summary = summarize_pflash_v7_metrics(collected_metrics)
+        if summary is not None:
+            rows.append((method, summary))
+
+    if not rows:
+        return
+
+    def fmt(value):
+        return "N/A" if value is None else f"{value:.3f}"
+
+    print("-" * 120)
+    print("P-Flash V7 multiverse branch routing")
+    print(
+        "{:<20} | {:>7} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8} | {:>6} | {:>6} | {:>6} | {:>6}".format(
+            "Method",
+            "Rounds",
+            "AltWin",
+            "BaseAcc",
+            "BestAcc",
+            "Gain",
+            "SelRank",
+            "B0",
+            "B1",
+            "B2",
+            "B3",
+        )
+    )
+    print("-" * 120)
+    for method, summary in rows:
+        print(
+            "{:<20} | {:>7} | {:>8} | {:>8} | {:>8} | {:>8} | {:>8} | {:>6} | {:>6} | {:>6} | {:>6}".format(
+                method,
+                summary["rounds"],
+                fmt(summary["alt_win_rate"]),
+                fmt(summary["avg_base_acceptance"]),
+                fmt(summary["avg_selected_acceptance"]),
+                fmt(summary["avg_gain"]),
+                fmt(summary["avg_selected_rank"]),
+                summary["branch_win_counts"][0],
+                summary["branch_win_counts"][1],
+                summary["branch_win_counts"][2],
+                summary["branch_win_counts"][3],
+            )
+        )
+    print("  AltWin is the fraction of rounds where a non-base anchor branch beat branch 0.")
+
+
 def print_batch_agreement_summary(data):
     rows = []
     bucket_rows = []
@@ -469,6 +552,7 @@ def print_single_result(data, filename):
         "pflash_v4_budget",
         "pflash_v5_budget",
         "pflash_v6_budget",
+        "pflash_v7_budget",
         "exp_ddtree_budget",
         "pexpress_perturbation_temperature",
         "pexpress_position_temperature_decay",
@@ -516,6 +600,7 @@ def print_single_result(data, filename):
 
     print_batch_agreement_summary(data)
     print_exp_ddtree_summary(data)
+    print_pflash_v7_summary(data)
     print_pair_sanity_checks(data)
     print_sample_coverage(data)
     print()
